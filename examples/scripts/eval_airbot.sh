@@ -52,11 +52,10 @@ elif [ "$MODE" = "dsrl" ]; then
         exit 1
     fi
     echo "=== Evaluating DSRL (pi0 + SAC) policy ==="
+    # SAC architecture is loaded from variant.json saved alongside the
+    # checkpoint during training, so no arch flags are needed here.
     python3 examples/eval_airbot.py --mode dsrl \
         --sac_checkpoint_dir "${SAC_CHECKPOINT_DIR}" \
-        --resize_image 128 \
-        --hidden_dims 1024 \
-        --num_qs 2 \
         "${COMMON_ARGS[@]}"
 else
     echo "Usage: $0 [pi0|dsrl]"

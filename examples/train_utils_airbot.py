@@ -14,7 +14,6 @@ import tty
 import termios
 from openpi_client import image_tools
 from moviepy.editor import ImageSequenceClip
-import PIL
 
 
 def obs_to_pi0_input(curr_obs, airbot_config, instruction):
@@ -40,15 +39,16 @@ def obs_to_pi0_input(curr_obs, airbot_config, instruction):
 def process_images_for_sac(variant, curr_obs, airbot_config):
     """Resize and concatenate camera images for the SAC agent's pixel observation.
 
+    Uses aspect-preserving letterbox resize to match the pi0 input pipeline.
     Returns array of shape (1, H, W, 3*num_cameras, 1).
     """
     img_list = []
     for cam_name in airbot_config['camera_names']:
         if cam_name in curr_obs['images']:
             img = curr_obs['images'][cam_name]
-            img = np.array(PIL.Image.fromarray(img).resize(
-                (variant.resize_image, variant.resize_image)
-            ))
+            img = image_tools.resize_with_pad(
+                img, variant.resize_image, variant.resize_image
+            )
             img_list.append(img)
 
     if len(img_list) == 0:
@@ -95,6 +95,10 @@ def trajwise_alternating_training_loop(variant, agent, robot, online_replay_buff
     with tqdm(total=variant.max_steps, initial=0) as pbar:
         while i <= variant.max_steps:
             traj = collect_traj(variant, agent, robot, i, agent_dp, wandb_logger, total_num_traj, airbot_config)
+            if traj.get('aborted'):
+                # User quit at the start prompt — skip without polluting the buffer.
+                print("Trajectory aborted; skipping update.")
+                continue
             total_num_traj += 1
             add_online_data_to_buffer(variant, traj, online_replay_buffer)
             total_env_steps += traj['env_steps']
@@ -184,26 +188,29 @@ def collect_traj(variant, agent, robot, i, agent_dp=None, wandb_logger=None, tra
     obs_list = []
     image_list = []
     is_success = False
+    t = -1
 
     old_settings = termios.tcgetattr(sys.stdin)
-    try:
-        tty.setcbreak(sys.stdin.fileno())
+    tty.setcbreak(sys.stdin.fileno())
 
-        # Wait for user to start episode
+    # Wait for user to start episode — handled outside the rollout try/finally
+    # so that pressing 'q' here returns immediately instead of running the
+    # post-episode cleanup (video save + reset prompt).
+    try:
         print("Press Enter to start episode (or 'q' to quit)...")
         while True:
             if select.select([sys.stdin], [], [], 0.1) == ([sys.stdin], [], []):
                 char_input = sys.stdin.read(1)
                 if char_input.lower() == 'q':
-                    print("Quitting...")
-                    termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
-                    return {
-                        'observations': [], 'actions': [], 'rewards': np.array([]),
-                        'masks': np.array([]), 'is_success': False, 'env_steps': 0,
-                    }
+                    print("Quitting (no trajectory collected).")
+                    return {'aborted': True, 'env_steps': 0}
                 elif char_input in ('\r', '\n'):
                     break
+    except BaseException:
+        termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+        raise
 
+    try:
         last_step_time = time.time()
 
         for t in tqdm(range(max_timesteps)):

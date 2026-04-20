@@ -41,7 +41,6 @@ python3 examples/launch_train_airbot.py \
 --query_freq 10 \
 --hidden_dims 1024 \
 --num_qs 2 \
---num_cameras 3 \
 --pi0_mode local \
 --pi0_config_path "${PI0_CONFIG_PATH}" \
 --pi0_checkpoint_dir "${PI0_CHECKPOINT_DIR}" \

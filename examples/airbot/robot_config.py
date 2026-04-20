@@ -21,7 +21,14 @@ class RobotConfig(BaseModel):
         if self.robot_groups is None:
             self.robot_groups = default_groups[: len(self.robot_ports)]
         elif len(self.robot_groups) != len(self.robot_ports):
-            self.robot_groups = self.robot_groups[: len(self.robot_ports)]
+            raise ValueError(
+                f"robot_groups length ({len(self.robot_groups)}) must match "
+                f"robot_ports length ({len(self.robot_ports)})."
+            )
 
-        for _ in range(len(self.camera_names) - len(self.camera_index)):
-            self.camera_names.pop()
+        if len(self.camera_names) != len(self.camera_index):
+            raise ValueError(
+                f"camera_names length ({len(self.camera_names)}) must match "
+                f"camera_index length ({len(self.camera_index)}). "
+                f"camera_names={self.camera_names}, camera_index={self.camera_index}"
+            )

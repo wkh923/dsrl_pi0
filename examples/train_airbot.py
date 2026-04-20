@@ -3,6 +3,7 @@
 Based on train_real.py (DROID/Franka), adapted for Airbot hardware.
 Supports both local and remote pi0 policy loading.
 """
+import json
 import os
 import logging
 
@@ -88,6 +89,11 @@ def main(variant):
         os.makedirs(outputdir)
     print('writing to output dir', outputdir)
 
+    # Persist the training variant so eval_airbot.py can reconstruct the SAC
+    # architecture without re-specifying every hyperparameter on the CLI.
+    with open(os.path.join(outputdir, 'variant.json'), 'w') as f:
+        json.dump(dict(variant), f, indent=2, default=str)
+
     group_name = variant.prefix + '_' + variant.launch_group_id
     wandb_output_dir = tempfile.mkdtemp()
     wandb_logger = WandBLogger(
@@ -123,6 +129,7 @@ def main(variant):
     # ---- Set up Airbot robot ----
     from examples.airbot.play_operator import Robot
     from examples.airbot.robot_config import RobotConfig
+    from airbot_data_collection.basis import SystemMode
 
     robot_config_obj = RobotConfig(
         robot_type=variant.robot_type,
@@ -134,6 +141,9 @@ def main(variant):
         robot_config_obj.robot_groups = variant.robot_groups
 
     robot = Robot(robot_config_obj)
+    # Move arms into servo-control mode. Without this, send_action either no-ops
+    # or KeyErrors inside AIRBOTPlay._comp_act[...].
+    robot.switch_mode(SystemMode.SAMPLING)
     print(f"Initialized Airbot robot: type={variant.robot_type}, ports={variant.robot_ports}")
 
     # Airbot config for training utilities
@@ -169,7 +179,14 @@ def main(variant):
     replay_buffer.seed(variant.seed)
 
     # ---- Start DSRL training ----
-    trajwise_alternating_training_loop(
-        variant, agent, robot, online_replay_buffer, replay_buffer, wandb_logger,
-        shard_fn=shard_fn, agent_dp=agent_dp, airbot_config=airbot_config
-    )
+    try:
+        trajwise_alternating_training_loop(
+            variant, agent, robot, online_replay_buffer, replay_buffer, wandb_logger,
+            shard_fn=shard_fn, agent_dp=agent_dp, airbot_config=airbot_config
+        )
+    finally:
+        # Release gRPC / RealSense handles even on Ctrl+C or exception.
+        try:
+            robot.shutdown()
+        except Exception as e:
+            logging.warning(f"robot.shutdown() failed: {e}")

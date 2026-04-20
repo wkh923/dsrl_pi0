@@ -14,6 +14,7 @@ Usage:
       --robot_ports 50051 --camera_names base_0_rgb left_wrist_0_rgb --camera_index 2 4
 """
 import argparse
+import json
 import os
 import sys
 import time
@@ -26,7 +27,6 @@ import jax
 import numpy as np
 from tqdm import tqdm
 from moviepy.editor import ImageSequenceClip
-import PIL
 import tensorflow as tf
 from jax.experimental.compilation_cache import compilation_cache
 
@@ -54,7 +54,7 @@ def process_images_for_sac(resize_image, curr_obs, airbot_config):
     for cam_name in airbot_config['camera_names']:
         if cam_name in curr_obs['images']:
             img = curr_obs['images'][cam_name]
-            img = np.array(PIL.Image.fromarray(img).resize((resize_image, resize_image)))
+            img = image_tools.resize_with_pad(img, resize_image, resize_image)
             img_list.append(img)
     if len(img_list) == 0:
         raise ValueError("No camera images found in observation")
@@ -234,6 +234,7 @@ def main(args):
     # ---- Set up robot ----
     from examples.airbot.play_operator import Robot
     from examples.airbot.robot_config import RobotConfig
+    from airbot_data_collection.basis import SystemMode
 
     robot_config = RobotConfig(
         robot_type=args.robot_type,
@@ -245,6 +246,7 @@ def main(args):
         robot_config.robot_groups = args.robot_groups
 
     robot = Robot(robot_config)
+    robot.switch_mode(SystemMode.SAMPLING)
     print(f"Initialized Airbot robot: type={args.robot_type}, ports={args.robot_ports}")
 
     num_arms = len(args.robot_ports)
@@ -266,13 +268,32 @@ def main(args):
 
         from jaxrl2.agents.pixel_sac.pixel_sac_learner import PixelSACLearner
         from jaxrl2.utils.general_utils import add_batch_dim
-        import gymnasium as gym
         from gym.spaces import Dict, Box
 
+        # Load the training variant so the SAC architecture matches exactly.
+        # Prefer an explicit --training_variant_path; otherwise look for
+        # variant.json in the parent of the checkpoint directory.
+        variant_path = args.training_variant_path or os.path.join(
+            os.path.dirname(os.path.abspath(args.sac_checkpoint_dir)), 'variant.json'
+        )
+        if not os.path.isfile(variant_path):
+            raise FileNotFoundError(
+                f"variant.json not found at {variant_path}. Pass "
+                "--training_variant_path to point at the training output dir."
+            )
+        with open(variant_path) as f:
+            train_variant = json.load(f)
+        train_kwargs = train_variant['train_kwargs']
+        print(f"Loaded training variant from {variant_path}")
+
+        # Reconcile CLI overrides with the training variant.
+        resize_image = train_variant.get('resize_image', args.resize_image)
+        add_states = int(train_variant.get('add_states', args.add_states))
+
         num_cameras = len(args.camera_names)
-        image_shape = (args.resize_image, args.resize_image, 3 * num_cameras, 1)
+        image_shape = (resize_image, resize_image, 3 * num_cameras, 1)
         obs_dict = {'pixels': Box(low=0, high=255, shape=image_shape, dtype=np.uint8)}
-        if args.add_states:
+        if add_states:
             obs_dict['state'] = Box(low=-np.inf, high=np.inf, shape=(state_dim + 2048, 1), dtype=np.float32)
         observation_space = Dict(obs_dict)
         action_space = Box(low=-1, high=1, shape=(1, 32,), dtype=np.float32)
@@ -280,31 +301,16 @@ def main(args):
         sample_obs = add_batch_dim(observation_space.sample())
         sample_action = add_batch_dim(action_space.sample())
 
-        # Use same hyperparams as training
-        agent = PixelSACLearner(
-            args.seed, sample_obs, sample_action,
-            actor_lr=1e-4, critic_lr=3e-4, temp_lr=3e-4,
-            hidden_dims=(args.hidden_dims,) * 3,
-            cnn_features=(32, 32, 32, 32),
-            cnn_strides=(3, 2, 2, 2),
-            cnn_padding='VALID',
-            latent_dim=50,
-            discount=0.99,
-            tau=0.005,
-            critic_reduction='min',
-            dropout_rate=0.0,
-            aug_next=1,
-            use_bottleneck=True,
-            encoder_type='small',
-            encoder_norm='group',
-            use_spatial_softmax=True,
-            softmax_temperature=-1,
-            target_entropy=0.0,
-            num_qs=args.num_qs,
-            action_magnitude=2.5,
-            num_cameras=num_cameras,
-        )
+        # Ensure num_cameras stays in sync with the actual cameras at eval time.
+        train_kwargs = dict(train_kwargs)
+        train_kwargs.pop('decay_steps', None)
+        train_kwargs.pop('cosine_decay', None)
+        train_kwargs['num_cameras'] = num_cameras
+
+        agent = PixelSACLearner(args.seed, sample_obs, sample_action, **train_kwargs)
         agent.restore_checkpoint(args.sac_checkpoint_dir)
+        # Propagate the actual resize_image downstream so run_episode reads it.
+        args.resize_image = resize_image
         print(f"Loaded SAC checkpoint from {args.sac_checkpoint_dir}")
 
     # ---- Run evaluation episodes ----
@@ -364,12 +370,13 @@ if __name__ == '__main__':
 
     # SAC checkpoint (dsrl mode only)
     parser.add_argument('--sac_checkpoint_dir', default='', help='Path to trained SAC checkpoint')
+    parser.add_argument('--training_variant_path', default='',
+                        help='Path to variant.json saved during training. '
+                             'If omitted, looks for it in the parent of --sac_checkpoint_dir.')
 
-    # SAC architecture (must match training)
+    # SAC fallback defaults (only used when variant.json cannot be found).
     parser.add_argument('--resize_image', default=128, type=int)
     parser.add_argument('--add_states', default=1, type=int)
-    parser.add_argument('--hidden_dims', default=1024, type=int)
-    parser.add_argument('--num_qs', default=2, type=int)
     parser.add_argument('--query_freq', default=10, type=int)
 
     # Robot config
