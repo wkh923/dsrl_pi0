@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader)",
+      "Bash(conda env:*)",
+      "Read(//home/jpy/anaconda3/envs/dsrl_pi0/bin/**)",
+      "Bash(/home/jpy/anaconda3/envs/dsrl_pi0/bin/python -c \":*)",
+      "Bash(/home/jpy/anaconda3/envs/dsrl_pi0/bin/python --version)",
+      "Bash(/home/jpy/anaconda3/envs/dsrl_pi0/bin/python -c \"import jax; print\\(''Devices:'', jax.devices\\(\\)\\)\")",
+      "Read(//home/jpy/RM/airbot/airbot-VLA-RL/airbot-pi0/openpi/data/pick_and_place/**)",
+      "Read(//home/jpy/openpi_checkpoints/1-1_pick_and_place/pnp_100/19999/**)",
+      "Bash(/home/jpy/anaconda3/envs/dsrl_pi0/bin/python -c \"import torch; print\\(''PyTorch:'', torch.__version__\\)\")",
+      "Bash(/home/jpy/anaconda3/envs/dsrl_pi0/bin/python -c \"import jax; print\\(''JAX:'', jax.__version__\\); print\\(''Devices:'', jax.devices\\(\\)\\)\")",
+      "Bash(nvidia-smi)",
+      "Bash(/home/jpy/anaconda3/envs/dsrl_pi0/bin/pip show:*)",
+      "Read(//home/jpy/RM/airbot/airbot-VLA-RL/airbot-pi0/openpi/examples/airbot/**)",
+      "Bash(chmod +x /home/jpy/dsrl_pi0/examples/scripts/eval_airbot.sh)",
+      "Bash(grep -r \"agent_dp\\\\|Policy\\\\\\(\" /home/jpy/dsrl_pi0/examples/*.py)",
+      "Bash(grep -r \"agent_dp\\\\|from openpi\" /home/jpy/dsrl_pi0/examples/*.py)",
+      "Bash(grep -r \"actions\\\\[t\\\\]\" /home/jpy/dsrl_pi0/examples/train_utils_*.py)",
+      "Read(//home/jpy/RM/airbot/airbot-VLA-RL/**)"
+    ]
+  }
+}

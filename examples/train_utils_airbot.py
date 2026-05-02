@@ -30,8 +30,8 @@ def obs_to_pi0_input(curr_obs, airbot_config, instruction):
     # Add camera images with the standard airbot observation keys
     for cam_name in airbot_config['camera_names']:
         if cam_name in curr_obs['images']:
-            request_data[f"observation/{cam_name}"] = image_tools.convert_to_uint8(
-                image_tools.resize_with_pad(curr_obs['images'][cam_name], 224, 224)
+            request_data[f"observation/{cam_name}"] = image_tools.resize_with_pad(
+                curr_obs['images'][cam_name], 224, 224
             )
     return request_data
 

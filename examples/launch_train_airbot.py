@@ -44,8 +44,8 @@ if __name__ == '__main__':
     parser.add_argument('--camera_names', nargs='+',
                         default=['base_0_rgb', 'left_wrist_0_rgb'],
                         help='Camera names matching airbot config')
-    parser.add_argument('--camera_index', nargs='+', default=[2, 4], type=int,
-                        help='Camera device indices')
+    parser.add_argument('--camera_index', nargs='+', default=['243322074422', '243522071794'],
+                        help='Camera serial numbers or device indices')
     parser.add_argument('--max_timesteps', default=200, help='Max timesteps per episode', type=int)
     parser.add_argument('--control_rate', default=20, help='Robot control rate in Hz', type=int)
 

@@ -180,7 +180,19 @@ class IntelRealSenseCamera(Sensor):
         Raises:
             OSError: If the image cannot be captured.
         """
-        frame = self._rs_pipe.wait_for_frames(timeout_ms=5000)
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                frame = self._rs_pipe.wait_for_frames(timeout_ms=1000)
+                break
+            except RuntimeError:
+                if attempt == max_retries - 1:
+                    raise
+                try:
+                    self._rs_pipe.stop()
+                except Exception:
+                    pass
+                self._connect()
         if self.config.align_depth:
             frame = self.align.process(frame)
         color_frame = frame.get_color_frame()

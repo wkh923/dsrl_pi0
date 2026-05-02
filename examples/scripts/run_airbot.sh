@@ -14,28 +14,29 @@ device_id=0
 export EXP=./logs/$proj_name
 export CUDA_VISIBLE_DEVICES=$device_id
 export XLA_PYTHON_CLIENT_PREALLOCATE=false
+export PYTHONPATH=.
 
 # ============================================================
 # Fill in your configuration below
 # ============================================================
 
 # Path to your VLA-RL task config.py (defines TASK_NAME, CAMERA_TOPICS, DELTA_ACTION_MASK, etc.)
-PI0_CONFIG_PATH=""  # e.g., "./VLA-RL/airbot-pi0/openpi/data/put_cup/config.py"
+PI0_CONFIG_PATH="/home/jpy/RM/airbot/airbot-VLA-RL/airbot-pi0/openpi/data/pick_and_place/config.py"  # e.g., "./VLA-RL/airbot-pi0/openpi/data/put_cup/config.py"
 
 # Path to your SFT checkpoint directory
-PI0_CHECKPOINT_DIR=""  # e.g., "./VLA-RL/airbot-pi0/openpi/checkpoints/put_cup/9000"
+PI0_CHECKPOINT_DIR="/home/jpy/RM/airbot/airbot-VLA-RL/airbot-pi0/openpi/checkpoints/1-1_pick_and_place/pnp_100/19999"  # e.g., "./VLA-RL/airbot-pi0/openpi/checkpoints/put_cup/9000"
 
 # Robot ports (single-arm: one port, dual-arm: two ports)
 ROBOT_PORTS="50051"  # For dual-arm: "50051 50053"
 
 # Camera device indices (matching your physical setup)
-CAMERA_INDEX="2 4"
+CAMERA_INDEX="243322074422 243522071794"
 
 # Camera names (must match what's defined in your config.py's CAMERA_TOPICS)
 CAMERA_NAMES="base_0_rgb left_wrist_0_rgb"
 
 # Task instruction
-INSTRUCTION="put the cup on the plate"
+INSTRUCTION="pick and place"
 
 # ============================================================
 

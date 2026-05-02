@@ -43,8 +43,8 @@ def obs_to_pi0_input(curr_obs, airbot_config, instruction):
     }
     for cam_name in airbot_config['camera_names']:
         if cam_name in curr_obs['images']:
-            request_data[f"observation/{cam_name}"] = image_tools.convert_to_uint8(
-                image_tools.resize_with_pad(curr_obs['images'][cam_name], 224, 224)
+            request_data[f"observation/{cam_name}"] = image_tools.resize_with_pad(
+                curr_obs['images'][cam_name], 224, 224
             )
     return request_data
 
@@ -119,18 +119,26 @@ def run_episode(args, robot, agent_dp, airbot_config, agent=None, rng=None, epis
                     print("Early stop.")
                     break
 
-            obs_raw = robot.capture_observation()
-            curr_obs = extract_observation(robot, obs_raw, airbot_config)
+            t0 = time.time()
+            t_cam = 0.0
+            t_infer = 0.0
 
-            first_cam = airbot_config['camera_names'][0]
-            if first_cam in curr_obs['images']:
-                image_list.append(curr_obs['images'][first_cam])
+            # Read cameras every 5 steps (for video) + always at query steps (for inference)
+            if t % 5 == 0 or t % query_frequency == 0:
+                obs_raw = robot.capture_observation()
+                t1 = time.time()
+                t_cam = t1 - t0
+                curr_obs = extract_observation(robot, obs_raw, airbot_config)
 
-            request_data = obs_to_pi0_input(curr_obs, airbot_config, instruction)
+                first_cam = airbot_config['camera_names'][0]
+                if first_cam in curr_obs['images']:
+                    image_list.append(curr_obs['images'][first_cam])
 
+            # Inference only at query steps
             if t % query_frequency == 0:
+                request_data = obs_to_pi0_input(curr_obs, airbot_config, instruction)
+                t2 = time.time()
                 if mode == 'pi0':
-                    # Pi0-only: no noise injection (use model's own sampling)
                     action = agent_dp.infer(request_data)["actions"]
                 elif mode == 'dsrl':
                     rng, key = jax.random.split(rng)
@@ -152,19 +160,24 @@ def run_episode(args, robot, agent_dp, airbot_config, agent=None, rng=None, epis
                     )
                     noise = jax.numpy.concatenate([actions_noise, noise], axis=0)[None]
                     action = agent_dp.infer(request_data, noise=np.asarray(noise))["actions"]
+                t_infer = time.time() - t2
+
+            t3 = time.time()
+            print(f"[t={t:3d}] cam:{t_cam*1000:.0f}ms  infer:{t_infer*1000:.0f}ms  total:{(t3-t0)*1000:.0f}ms")
 
             action_t = action[t % query_frequency]
-            action_t = np.clip(action_t, -1, 1)
 
-            # Binarize gripper
-            state_dim = airbot_config['state_dim']
-            num_arms = state_dim // 7
-            for arm_idx in range(num_arms):
-                gripper_idx = (arm_idx + 1) * 7 - 1
-                if gripper_idx < len(action_t):
-                    action_t[gripper_idx] = 1.0 if action_t[gripper_idx] > 0.5 else 0.0
-
-            robot.send_action(action_t[:state_dim])
+            if mode == 'dsrl':
+                action_t = np.clip(action_t, -1, 1)
+                state_dim = airbot_config['state_dim']
+                num_arms = state_dim // 7
+                for arm_idx in range(num_arms):
+                    gripper_idx = (arm_idx + 1) * 7 - 1
+                    if gripper_idx < len(action_t):
+                        action_t[gripper_idx] = 1.0 if action_t[gripper_idx] > 0.5 else 0.0
+                robot.send_action(action_t[:state_dim])
+            else:
+                robot.send_action(action_t)
 
             now = time.time()
             dt = now - last_step_time
@@ -321,6 +334,10 @@ def main(args):
 
     successes = []
     for ep in range(args.num_episodes):
+        if args.reset_action:
+            print(f"Resetting arm to specified pose...")
+            robot.reset_to_pose(args.reset_action)
+            print("Reset done.")
         rng, ep_rng = jax.random.split(rng)
         result = run_episode(args, robot, agent_dp, airbot_config, agent=agent, rng=ep_rng, episode_id=ep)
 
@@ -377,16 +394,18 @@ if __name__ == '__main__':
     # SAC fallback defaults (only used when variant.json cannot be found).
     parser.add_argument('--resize_image', default=128, type=int)
     parser.add_argument('--add_states', default=1, type=int)
-    parser.add_argument('--query_freq', default=10, type=int)
+    parser.add_argument('--query_freq', default=25, type=int)
 
     # Robot config
     parser.add_argument('--robot_type', default='play')
     parser.add_argument('--robot_ports', nargs='+', default=[50051], type=int)
     parser.add_argument('--robot_groups', nargs='+', default=None)
     parser.add_argument('--camera_names', nargs='+', default=['base_0_rgb', 'left_wrist_0_rgb'])
-    parser.add_argument('--camera_index', nargs='+', default=[2, 4], type=int)
+    parser.add_argument('--camera_index', nargs='+', default=['243322074422', '243522071794'])
     parser.add_argument('--max_timesteps', default=200, type=int)
     parser.add_argument('--control_rate', default=20, type=int)
+    parser.add_argument('--reset_action', nargs='+', type=float, default=None,
+                        help='Joint positions to reset the arm to before each episode (e.g. 7 values for single-arm)')
 
     args = parser.parse_args()
     main(args)

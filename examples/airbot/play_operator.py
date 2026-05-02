@@ -35,6 +35,14 @@ class Robot:
         for key, value in zip(self.keys, self.values, strict=True):
             if not value.configure():
                 raise RuntimeError(f"Failed to configure {key}.")
+        # Warm-up: discard a few frames so the camera pipeline is ready
+        # when the first real capture_observation() is called (which may be
+        # seconds later, after model loading / user prompt).
+        for name, cam in self.cameras.items():
+            try:
+                cam.capture_observation()
+            except Exception:
+                pass
 
     def switch_mode(self, mode):
         """Switch the mode of the robot."""
@@ -65,6 +73,19 @@ class Robot:
             qpos.extend(obs[f"{group}/arm/joint_state"]["data"]["position"])
             qpos.extend(obs[f"{group}/eef/joint_state"]["data"]["position"])
         return qpos
+
+    def reset_to_pose(self, joint_positions, wait_time=3.0):
+        """Reset the arm to a specified joint pose using planning mode."""
+        import time
+        from airbot_data_collection.basis import SystemMode
+        self.switch_mode(SystemMode.RESETTING)
+        time.sleep(0.1)
+        for index, (_group, robot) in enumerate(self.robots.items()):
+            segment = joint_positions[index * 7 : (index + 1) * 7]
+            robot.send_action([float(x) for x in segment])
+        time.sleep(wait_time)
+        self.switch_mode(SystemMode.SAMPLING)
+        time.sleep(0.1)
 
     def shutdown(self) -> bool:
         """Shutdown the robot."""
