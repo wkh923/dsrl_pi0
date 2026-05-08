@@ -13,21 +13,38 @@ device_id=0
 
 export CUDA_VISIBLE_DEVICES=$device_id
 export XLA_PYTHON_CLIENT_PREALLOCATE=false
-export PYTHONPATH=.
+export PYTHONPATH=.:./Airbot
 
 # ============================================================
 # Shared configuration (keep in sync with run_airbot.sh)
 # ============================================================
 
-PI0_CONFIG_PATH="/home/jpy/RM/airbot/airbot-VLA-RL/airbot-pi0/openpi/data/pick_and_place/config.py"
-PI0_CHECKPOINT_DIR="/home/jpy/RM/airbot/airbot-VLA-RL/airbot-pi0/openpi/checkpoints/1-1_pick_and_place/pnp_100/19999"
+# PI0_CONFIG_PATH="/home/jpy/RM/airbot/airbot-VLA-RL/airbot-pi0/openpi/data/pick_and_place/config.py"
+# PI0_CHECKPOINT_DIR="/home/jpy/RM/airbot/airbot-VLA-RL/airbot-pi0/openpi/checkpoints/1-1_pick_and_place/pnp_100/19999"
 
-ROBOT_PORTS="50051"
-CAMERA_INDEX="243322074422 243522071794"
-CAMERA_NAMES="base_0_rgb left_wrist_0_rgb"
-INSTRUCTION="pick and place"
+# RESET_ACTION="-0.001618136651813984 -1.0361113548278809 0.8421794176101685 -1.6158959865570068 0.6345375776290894 1.6957406997680664 0.0"
 
-RESET_ACTION="-0.001618136651813984 -1.0361113548278809 0.8421794176101685 -1.6158959865570068 0.6345375776290894 1.6957406997680664 0.0"
+# Path to your VLA-RL task config.py (defines TASK_NAME, CAMERA_TOPICS, DELTA_ACTION_MASK, etc.)
+PI0_CONFIG_PATH="/home/jpy/RM/Airbot-VLA-RL/VLA/airbot-pi0/openpi/data/pick_eraser_out_of_box/config.py"
+
+# Path to your SFT checkpoint directory
+PI0_CHECKPOINT_DIR="/home/jpy/RM/Airbot-VLA-RL/VLA/airbot-pi0/checkpoints/pick_eraser_out_of_box/pick_eraser/5000"
+
+# Robot ports (single-arm: one port, dual-arm: two ports)
+ROBOT_PORTS="50051 50053"  # dual-arm
+
+# Camera device indices (matching your physical setup; mapping mirrors
+# Airbot-VLA-RL/Airbot/spacemouse/test_inference_with_spacemouse.py dual-arm).
+# base_0_rgb=243222074218, left_wrist_0_rgb=243522071794, right_wrist_0_rgb=243222071389
+CAMERA_INDEX="243222074218 243522071794 243222071389"
+
+# Camera names (must match what's defined in your config.py's CAMERA_TOPICS)
+CAMERA_NAMES="base_0_rgb left_wrist_0_rgb right_wrist_0_rgb"
+
+# Task instruction
+INSTRUCTION="pick eraser out of box"
+RESET_ACTION="-0.001618 -1.036 0.842 -1.615 0.634 1.695 0.0 -0.001618 -1.036 0.842 -1.615 0.634 1.695 0.0"
+
 
 # ============================================================
 

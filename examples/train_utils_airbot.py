@@ -190,6 +190,16 @@ def collect_traj(variant, agent, robot, i, agent_dp=None, wandb_logger=None, tra
     is_success = False
     t = -1
 
+    # Auto-reset both arms to a known starting pose before each episode, so
+    # the operator only has to put workbench objects back, not drive the arms.
+    # Empty list (default unless --reset_action is passed) skips the reset.
+    reset_action = getattr(variant, 'reset_action', None) or []
+    if reset_action:
+        wait_time = getattr(variant, 'reset_wait_time', 3.0)
+        print(f"Auto-resetting arms to home pose (wait {wait_time}s)...")
+        robot.reset_to_pose(reset_action, wait_time=wait_time)
+        print("Reset complete.")
+
     old_settings = termios.tcgetattr(sys.stdin)
     tty.setcbreak(sys.stdin.fileno())
 
@@ -197,7 +207,7 @@ def collect_traj(variant, agent, robot, i, agent_dp=None, wandb_logger=None, tra
     # so that pressing 'q' here returns immediately instead of running the
     # post-episode cleanup (video save + reset prompt).
     try:
-        print("Press Enter to start episode (or 'q' to quit)...")
+        print("Reset workbench as needed, then press Enter to start episode (or 'q' to quit)...")
         while True:
             if select.select([sys.stdin], [], [], 0.1) == ([sys.stdin], [], []):
                 char_input = sys.stdin.read(1)
@@ -267,20 +277,29 @@ def collect_traj(variant, agent, robot, i, agent_dp=None, wandb_logger=None, tra
                 obs_list.append(obs_dict)
                 action = agent_dp.infer(request_data, noise=np.asarray(noise))["actions"]
 
+                # --- DEBUG: inspect pi0 output ---
+                # action shape: (action_horizon, action_dim) = (50, 32). Only first
+                # state_dim values are real; rest is pi0's 32-dim padding.
+                _state_dim = airbot_config['state_dim']
+                _np_action = np.asarray(action)
+                _first = _np_action[0, :_state_dim]   # first chunk position, real dims
+                _all_real = _np_action[:, :_state_dim]
+                print(f"\n[pi0 out @ traj_i={i}, t={t}]")
+                print(f"  shape={_np_action.shape}  state_dim={_state_dim}")
+                print(f"  qpos    (current)        = {curr_obs['qpos']}")
+                print(f"  action[0,:state_dim]     = {_first}")
+                print(f"  chunk min/max/mean       = {_all_real.min():.4f} / "
+                      f"{_all_real.max():.4f} / {_all_real.mean():.4f}")
+                print(f"  delta_to_first (action-qpos) = {_first - np.asarray(curr_obs['qpos'])}")
+                # --- end DEBUG ---
+
             action_t = action[t % query_frequency]
 
-            # Clip actions to valid range
-            action_t = np.clip(action_t, -1, 1)
-
-            # Binarize gripper action(s)
+            # Send action to robot. pi0 outputs absolute joint angles (radians)
+            # via AbsoluteActions output transform — clipping to [-1,1] would
+            # mangle them (e.g. j4=-1.615 rad would become -1.0). Match
+            # eval_airbot.py's pi0-mode path: send raw, slice to state_dim.
             state_dim = airbot_config['state_dim']
-            num_arms = state_dim // 7
-            for arm_idx in range(num_arms):
-                gripper_idx = (arm_idx + 1) * 7 - 1
-                if gripper_idx < len(action_t):
-                    action_t[gripper_idx] = 1.0 if action_t[gripper_idx] > 0.5 else 0.0
-
-            # Send action to robot (only the first state_dim dimensions)
             robot.send_action(action_t[:state_dim])
 
             # Maintain control rate

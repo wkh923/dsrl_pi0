@@ -1,0 +1,65 @@
+#!/bin/bash
+# Drop-in wrapper for `airbot_server` that filters known-noisy log lines.
+# Usage (same args as airbot_server):
+#   airbot_server -i can_left -p 50051
+#
+# Env vars:
+#   AIRBOT_QUIET=0        bypass filter entirely
+#   AIRBOT_QUIET_DEBUG=1  also tee the raw output to /tmp/airbot_server.raw.log
+
+set -o pipefail
+
+REAL_BIN="$(command -v -- airbot_server | grep -v airbot_server_quiet | head -n1)"
+if [[ -z "$REAL_BIN" ]]; then
+  echo "airbot_server_quiet: cannot find the real airbot_server in PATH" >&2
+  exit 127
+fi
+
+if [[ "${AIRBOT_QUIET:-1}" == "0" ]]; then
+  exec "$REAL_BIN" "$@"
+fi
+
+PATTERNS_FILE="$(dirname -- "$(readlink -f -- "$0")")/airbot_server_quiet.patterns"
+if [[ ! -f "$PATTERNS_FILE" ]]; then
+  echo "airbot_server_quiet: patterns file missing: $PATTERNS_FILE" >&2
+  exec "$REAL_BIN" "$@"
+fi
+
+# 1. Strip ANSI SGR escapes + trailing CRs so literal patterns match.
+# 2. Re-append CR on output so the terminal displays correctly even if
+#    airbot_server put the tty in raw mode and did not restore ONLCR.
+STRIP_ANSI='s/\x1b\[[0-9;]*[mGKHF]//g; s/\r$//'
+ADD_CR='s/$/\r/'
+
+# Restore sane tty state on exit in case airbot_server left it in raw mode.
+cleanup() { stty sane 2>/dev/null || true; }
+trap cleanup EXIT INT TERM
+
+# Colorize only when final stdout is a terminal and NO_COLOR is not set.
+if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
+  COLOR=(perl -pe 'BEGIN{$|=1}
+    s/\[ERROR\]/\e[1;31m$&\e[0m/g;
+    s/\[WARN\]/\e[33m$&\e[0m/g;
+    s/\[INFO\]/\e[32m$&\e[0m/g;
+    s/\[(\d+\.\d+)\]/\e[90m[$1]\e[0m/g;
+    s/(\[[A-Za-z0-9_][A-Za-z0-9_.]*\]):/\e[36m$1\e[0m:/g;
+  ')
+else
+  COLOR=(cat)
+fi
+
+if [[ "${AIRBOT_QUIET_DEBUG:-0}" == "1" ]]; then
+  stdbuf -oL -eL "$REAL_BIN" "$@" 2>&1 \
+    | tee /tmp/airbot_server.raw.log \
+    | sed -u "$STRIP_ANSI" \
+    | grep --line-buffered -a -vEf "$PATTERNS_FILE" \
+    | "${COLOR[@]}" \
+    | sed -u "$ADD_CR"
+else
+  stdbuf -oL -eL "$REAL_BIN" "$@" 2>&1 \
+    | sed -u "$STRIP_ANSI" \
+    | grep --line-buffered -a -vEf "$PATTERNS_FILE" \
+    | "${COLOR[@]}" \
+    | sed -u "$ADD_CR"
+fi
+exit "${PIPESTATUS[0]}"

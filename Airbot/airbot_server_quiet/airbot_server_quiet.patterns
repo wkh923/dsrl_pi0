@@ -1,0 +1,58 @@
+^$
+CycloneDDS/Domain/General.*NetworkInterfaceAddress.*deprecated
+\[INFO\] \[launch\]:
+\[INFO\] \[(spawner|server_node|ros2_control_node|robot_state_publisher|move_group|servo_node|server|aggregator_node|component_container_mt)-[0-9]+\]: process (started with pid|has finished cleanly)
+WARNING:root:Cannot infer URDF
+WARNING:root:"File .* doesn't exist"
+WARNING:root:The robot description will be loaded from
+Could not enable FIFO RT scheduling policy
+Realtime kernel is recommended
+Failed to set FIFO RT policy: Operation not permitted
+shared_io_context_ (status: running|stopped)
+Socketcan plugin (initialized|started spinning) on
+(Adding|Deleting) callback with key
+Loading 'move_group/
+Loading 'pilz_industrial_motion_planner/
+You can start planning now
+kdl_parser.*root link base_link has an inertia
+Importing state interfaces for the hardware '_led' returned no state interfaces
+\[deprecated\] 'open_loop_control' parameter is deprecated
+Resolution not specified for Octomap
+No 3D sensor plugin
+No planning response adapter names specified
+Controller with name '[^']+' is not inactive so its following controllers
+Controller with name '[^']+' can not be deactivated since it is not active
+Could not (activate|deactivate) controller with name
+class_loader\.ClassLoader: SEVERE WARNING
+at line 127 in .*class_loader\.cpp
+^\[move_group-[0-9]+\]\s*$
+\[PZ[A-Z0-9]+\.fsm\]: on change_led_color to
+\[PZ[A-Z0-9]+\.fsm\]: Transition (configure|activate) for sdk_server succeeded
+\[PZ[A-Z0-9]+\.fsm\]: Waiting for (coefficients|home pos)
+\[PZ[A-Z0-9]+\.fsm\]: (Configured|Activated) controller
+\[PZ[A-Z0-9]+\.fsm\]: hardware '(_led|_button|joint[1-9]|eef_gripper_joint)' state set to (active|unconfigured)
+Waiting for motor (configuration|state) to be synced
+Arm controller not ready:
+Eef controller not ready:
+\[identify_product\]: (Product info file not found|No error)
+\[PZ[A-Z0-9]+\.fsm\]: ros2 launch process created
+ros2_control_node-2\] running
+\[PZ[A-Z0-9]+\.fsm\]: Received signal 2
+\[WARNING\] \[launch\]: user interrupted with ctrl-c
+sending signal 'SIGINT' to process\[
+interface not in available list\. This should not happen \(hint: multiple cleanup calls\)
+Unable to transform object from frame .* to planning frame
+Execution of motions should always start at the robot's current state
+planning volume was not specified\. Using default values
+terminate called (after throwing an instance of|without an active exception)
+context cannot be slept with because it's invalid
+Stack trace \(most recent call last\)
+^\[[A-Za-z0-9_]+-[0-9]+\] #[0-9]+\s+Object
+^\[[A-Za-z0-9_]+-[0-9]+\] Aborted \(Signal sent by tkill
+\[ERROR\] \[(move_group|server|ros2_control_node|aggregator_node|component_container_mt|servo_node|robot_state_publisher|server_node)-[0-9]+\]: process has died
+^\[server_node-[0-9]+\] Traceback \(most recent call last\):
+^\[server_node-[0-9]+\]\s+File ".*", line [0-9]+, in
+^\[server_node-[0-9]+\]\s{4,}\S
+^\[server_node-[0-9]+\] rclpy\._rclpy_pybind11\.RCLError
+^\[server_node-[0-9]+\] SocketcanBus was not properly shut down
+^\[ros2run\]: Interrupt

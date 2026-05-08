@@ -18,7 +18,9 @@
       "Bash(grep -r \"agent_dp\\\\|Policy\\\\\\(\" /home/jpy/dsrl_pi0/examples/*.py)",
       "Bash(grep -r \"agent_dp\\\\|from openpi\" /home/jpy/dsrl_pi0/examples/*.py)",
       "Bash(grep -r \"actions\\\\[t\\\\]\" /home/jpy/dsrl_pi0/examples/train_utils_*.py)",
-      "Read(//home/jpy/RM/airbot/airbot-VLA-RL/**)"
+      "Read(//home/jpy/RM/airbot/airbot-VLA-RL/**)",
+      "Read(//home/jpy/.ssh/**)",
+      "Bash(ssh -T git@github.com)"
     ]
   }
 }

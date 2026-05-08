@@ -97,7 +97,7 @@ External hardware dependencies (not vendored): `airbot_py` (gRPC SDK wheel), `py
 | Parameter | Libero | Aloha | Real (Franka) | Airbot |
 |---|---|---|---|---|
 | `multi_grad_step` (UTD) | 20 | 20 | 30 | 30 |
-| `query_freq` | 20 | 50 | 10 | 10 |
+| `query_freq` | 20 | 50 | 10 | 25 |
 | `action_magnitude` | 1.0 | 2.0 | 2.5 | 2.5 |
 | `num_qs` | 10 | 10 | 2 | 2 |
 | `resize_image` | 64 | 64 | 128 | 128 |

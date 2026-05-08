@@ -1,0 +1,37 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git submodule:*)",
+      "Bash(conda run:*)",
+      "Bash(git remote *)",
+      "Bash(ssh -T git@github.com-wkh)",
+      "Bash(PYTHONPATH=.:./Airbot /home/jpy/anaconda3/envs/dsrl_pi0/bin/python -)",
+      "Read(//tmp/**)",
+      "Bash(/home/jpy/anaconda3/envs/dsrl_pi0/bin/python -c \"import airbot_py; print\\('LEAK:', airbot_py.__file__\\)\")",
+      "Bash(ls /home/jpy/RM/Airbot-VLA-RL/VLA/ /home/jpy/RM/Airbot-VLA-RL/SERL/ 2>&1 | head -40)",
+      "Read(//home/jpy/RM/Airbot-VLA-RL/VLA/**)",
+      "Bash(grep -n \"DEFAULT_DH_MAP\\\\s*=\\\\|DEFAULT_DH_MAP\\\\[\" /home/jpy/dsrl_pi0/Airbot/airbot_kdl/arm_kdl.py 2>&1 | head; echo \"---\"; sed -n '/DEFAULT_DH_MAP\\\\s*=/,/^}/p' /home/jpy/dsrl_pi0/Airbot/airbot_kdl/arm_kdl.py 2>/dev/null | head -40)",
+      "Bash(/home/jpy/anaconda3/envs/dsrl_pi0/bin/python -c ' *)",
+      "Bash(ls /home/jpy/RM/Airbot-VLA-RL/VLA/airbot-pi0/checkpoints/pick_eraser_out_of_box/pick_eraser/19999/ 2>&1 | head -20; echo \"---\"; grep -n \"243522071794\\\\|243222074218\\\\|243222071389\\\\|243322074422\\\\|camera-index\\\\|camera_index\" /home/jpy/RM/Airbot-VLA-RL/Airbot/spacemouse/test_inference_with_spacemouse.py 2>&1 | head -20)",
+      "Read(//home/jpy/RM/Airbot-VLA-RL/Airbot/spacemouse/**)",
+      "Read(//usr/bin/**)",
+      "Bash(dpkg -l)",
+      "Bash(command -v airbot_server)",
+      "Read(//home/jpy/.local/bin/**)",
+      "Bash(sed -n '270,290p' /home/jpy/dsrl_pi0/examples/train_utils_airbot.py)",
+      "Bash(sed -n '168,182p' /home/jpy/dsrl_pi0/examples/eval_airbot.py)",
+      "Bash(sed -n '255,285p' /home/jpy/dsrl_pi0/examples/train_utils_airbot.py)",
+      "Bash(sed -n '141,143p' /home/jpy/dsrl_pi0/examples/eval_airbot.py)",
+      "Bash(sed -n '225,250p' /home/jpy/dsrl_pi0/examples/train_utils_sim.py)",
+      "Bash(sed -n '160,195p' /home/jpy/dsrl_pi0/examples/train_utils_real.py)",
+      "Bash(find /home/jpy/RM/Airbot-VLA-RL/VLA/airbot-pi0/openpi -name \"pi0.py\" -type f 2>/dev/null; echo \"---\"; find /home/jpy/RM/Airbot-VLA-RL -path \"*models*pi0*\" -name \"*.py\" 2>/dev/null | head)",
+      "Read(//home/jpy/RM/Airbot-VLA-RL/**)",
+      "Bash(echo \"=== prompt_from_task 在 dsrl 侧怎么配的 ===\" *)",
+      "Read(//home/jpy/.cache/huggingface/lerobot/pick_eraser_out_of_box/meta/**)"
+    ],
+    "additionalDirectories": [
+      "/home/jpy/.ssh",
+      "/home/jpy/dsrl_pi0/Airbot/airbot_kdl"
+    ]
+  }
+}
