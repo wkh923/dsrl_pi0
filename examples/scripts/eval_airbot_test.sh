@@ -33,7 +33,7 @@ export PYTHONPATH=.:./Airbot
 PI0_CONFIG_PATH="/home/jpy/RM/Airbot-VLA-RL/VLA/airbot-pi0/openpi/data/pick_eraser_out_of_box/config.py"
 
 # Path to your SFT checkpoint directory
-PI0_CHECKPOINT_DIR="/home/jpy/RM/Airbot-VLA-RL/VLA/airbot-pi0/checkpoints/pick_eraser_out_of_box/pick_eraser/39999"
+PI0_CHECKPOINT_DIR="/home/jpy/RM/Airbot-VLA-RL/VLA/airbot-pi0/checkpoints/pick_eraser_out_of_box/pick_eraser/30000"
 
 # Robot ports (single-arm: one port, dual-arm: two ports)
 ROBOT_PORTS="50051 50053"  # dual-arm

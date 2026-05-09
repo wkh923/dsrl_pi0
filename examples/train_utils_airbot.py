@@ -136,8 +136,14 @@ def trajwise_alternating_training_loop(variant, agent, robot, online_replay_buff
                         wandb_logger.log({'num_online_samples': len(online_replay_buffer)}, step=i)
                         wandb_logger.log({'num_online_trajs': total_num_traj}, step=i)
                         wandb_logger.log({'env_steps': total_env_steps}, step=i)
-                        if hasattr(agent, 'perform_eval'):
-                            agent.perform_eval(variant, i, wandb_logger, replay_buffer, replay_buffer_iterator, None)
+                        # NOTE: agent.perform_eval -> make_value_reward_visulization -> make_visual
+                        # asserts images.shape[-1] == 3 (single-camera RGB). With multi-camera
+                        # setups (Airbot dual-arm has 3 cams concat'd to 9 channels) the assert
+                        # fires and the whole training loop crashes. Pure visualization — no
+                        # effect on SAC weights / replay buffer / checkpoint / rollout. Disabled
+                        # until make_visual is patched to handle multi-camera obs.
+                        # if hasattr(agent, 'perform_eval'):
+                        #     agent.perform_eval(variant, i, wandb_logger, replay_buffer, replay_buffer_iterator, None)
 
                     if variant.checkpoint_interval != -1:
                         if i % variant.checkpoint_interval == 0:
@@ -224,6 +230,7 @@ def collect_traj(variant, agent, robot, i, agent_dp=None, wandb_logger=None, tra
         last_step_time = time.time()
 
         for t in tqdm(range(max_timesteps)):
+            t_step_start = time.time()  # DEBUG TIMING
             # Check for early stop
             if select.select([sys.stdin], [], [], 0) == ([sys.stdin], [], []):
                 char_input = sys.stdin.read(1)
@@ -232,24 +239,36 @@ def collect_traj(variant, agent, robot, i, agent_dp=None, wandb_logger=None, tra
                     break
 
             # Get observation from robot
+            _t0 = time.time()
             obs_raw = robot.capture_observation()
+            t_cam = time.time() - _t0
             curr_obs = extract_observation(robot, obs_raw, airbot_config)
             # Save first camera image for video logging
             first_cam = airbot_config['camera_names'][0]
             if first_cam in curr_obs['images']:
                 image_list.append(curr_obs['images'][first_cam])
 
+            _t0 = time.time()
             request_data = obs_to_pi0_input(curr_obs, airbot_config, instruction)
+            t_pi0in = time.time() - _t0
+
+            # Per-segment timers (set 0 on non-query steps)
+            t_img_sac = t_prefix = t_sac = t_infer = 0.0
 
             if t % query_frequency == 0:
                 rng, key = jax.random.split(rng)
 
+                _t0 = time.time()
                 img_all = process_images_for_sac(variant, curr_obs, airbot_config)
+                t_img_sac = time.time() - _t0
 
                 # Extract VLM features from pi0 backbone and concat with qpos as state
+                _t0 = time.time()
                 img_rep_pi0, _ = agent_dp.get_prefix_rep(request_data)
                 img_rep_pi0 = img_rep_pi0[:, -1, :]  # (1, 2048)
-                qpos = np.concatenate([curr_obs["qpos"], img_rep_pi0.flatten()])
+                img_rep_pi0.block_until_ready()      # force JAX sync for accurate timing
+                t_prefix = time.time() - _t0
+                qpos = np.concatenate([curr_obs["qpos"], np.asarray(img_rep_pi0).flatten()])
 
                 obs_dict = {
                     'pixels': img_all,
@@ -266,7 +285,14 @@ def collect_traj(variant, agent, robot, i, agent_dp=None, wandb_logger=None, tra
                     actions_noise = noise[0, :agent.action_chunk_shape[0], :]
                 else:
                     # SAC agent predicts noise for the diffusion model
+                    _t0 = time.time()
                     actions_noise = agent.sample_actions(obs_dict)
+                    _na = np.asarray(actions_noise)   # blocks JAX → measures real wall time
+                    t_sac = time.time() - _t0
+                    # --- DEBUG: SAC noise stats — verify distribution sanity ---
+                    print(f"  SAC noise: shape={_na.shape} mean={float(_na.mean()):+.3f} "
+                          f"std={float(_na.std()):.3f} min={float(_na.min()):+.3f} max={float(_na.max()):+.3f}")
+                    # --- end DEBUG ---
                     actions_noise = np.reshape(actions_noise, agent.action_chunk_shape)
                     noise = np.repeat(
                         actions_noise[-1:, :], action_horizon - actions_noise.shape[0], axis=0
@@ -275,17 +301,19 @@ def collect_traj(variant, agent, robot, i, agent_dp=None, wandb_logger=None, tra
 
                 action_list.append(actions_noise)
                 obs_list.append(obs_dict)
+                _t0 = time.time()
                 action = agent_dp.infer(request_data, noise=np.asarray(noise))["actions"]
+                action = np.asarray(action)           # blocks JAX → measures real wall time
+                t_infer = time.time() - _t0
 
                 # --- DEBUG: inspect pi0 output ---
                 # action shape: (action_horizon, action_dim) = (50, 32). Only first
                 # state_dim values are real; rest is pi0's 32-dim padding.
                 _state_dim = airbot_config['state_dim']
-                _np_action = np.asarray(action)
-                _first = _np_action[0, :_state_dim]   # first chunk position, real dims
-                _all_real = _np_action[:, :_state_dim]
+                _first = action[0, :_state_dim]
+                _all_real = action[:, :_state_dim]
                 print(f"\n[pi0 out @ traj_i={i}, t={t}]")
-                print(f"  shape={_np_action.shape}  state_dim={_state_dim}")
+                print(f"  shape={action.shape}  state_dim={_state_dim}")
                 print(f"  qpos    (current)        = {curr_obs['qpos']}")
                 print(f"  action[0,:state_dim]     = {_first}")
                 print(f"  chunk min/max/mean       = {_all_real.min():.4f} / "
@@ -300,7 +328,21 @@ def collect_traj(variant, agent, robot, i, agent_dp=None, wandb_logger=None, tra
             # mangle them (e.g. j4=-1.615 rad would become -1.0). Match
             # eval_airbot.py's pi0-mode path: send raw, slice to state_dim.
             state_dim = airbot_config['state_dim']
+            _t0 = time.time()
             robot.send_action(action_t[:state_dim])
+            t_send = time.time() - _t0
+
+            # --- DEBUG TIMING: full per-step breakdown at query, slow warning otherwise ---
+            t_step = time.time() - t_step_start
+            if t % query_frequency == 0:
+                print(f"  TIMING t={t}: cam={t_cam*1000:.0f} pi0in={t_pi0in*1000:.0f} "
+                      f"img_sac={t_img_sac*1000:.0f} prefix={t_prefix*1000:.0f} "
+                      f"sac={t_sac*1000:.0f} infer={t_infer*1000:.0f} send={t_send*1000:.0f} "
+                      f"TOTAL={t_step*1000:.0f}ms (target {int(step_time*1000)}ms)")
+            elif t_step > 0.080:
+                print(f"  SLOW t={t}: cam={t_cam*1000:.0f} pi0in={t_pi0in*1000:.0f} "
+                      f"send={t_send*1000:.0f} TOTAL={t_step*1000:.0f}ms")
+            # --- end DEBUG TIMING ---
 
             # Maintain control rate
             now = time.time()

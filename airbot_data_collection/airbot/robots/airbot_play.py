@@ -37,7 +37,7 @@ except ImportError:
 class AIRBOTPlayConfig(SystemConfig):
     url: str = "localhost"
     port: PositiveInt = 50050
-    speed_profile: Optional[Union[SpeedProfile, str]] = SpeedProfile.FAST
+    speed_profile: Optional[Union[SpeedProfile, str]] = SpeedProfile.DEFAULT
     limit: Dict[str, Dict[Union[str, int], Tuple[float, float]]] = {}
     backend: str = "grpc"  # grpc or thin
     components: List[str] = Field(["arm", "eef"], min_length=1)
@@ -96,16 +96,16 @@ class AIRBOTPlay(System):
             "eef": self.interface.servo_eef_pos,
         }
         if self.interface.connect():
-            # self.interface.set_speed_profile(self.config.speed_profile)
-            self.interface.set_params(
-                {
-                    "servo_node.moveit_servo.scale.linear": 10.0,
-                    "servo_node.moveit_servo.scale.rotational": 10.0,
-                    "servo_node.moveit_servo.scale.joint": 1.0,
-                    "sdk_server.max_velocity_scaling_factor": 1.0,
-                    "sdk_server.max_acceleration_scaling_factor": 0.5,
-                }
-            )
+            self.interface.set_speed_profile(self.config.speed_profile)
+            # self.interface.set_params(
+            #     {
+            #         "servo_node.moveit_servo.scale.linear": 10.0,
+            #         "servo_node.moveit_servo.scale.rotational": 10.0,
+            #         "servo_node.moveit_servo.scale.joint": 1.0,
+            #         "sdk_server.max_velocity_scaling_factor": 1.0,
+            #         "sdk_server.max_acceleration_scaling_factor": 0.5,
+            #     }
+            # )
             self._init_relative_control()
             # check if the robot components are available
             info = self.interface.get_product_info()

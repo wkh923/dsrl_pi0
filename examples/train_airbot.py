@@ -83,7 +83,9 @@ def main(variant):
     else:
         expname = create_exp_name(variant.prefix, seed=variant.seed)
 
-    outputdir = os.path.join(os.environ.get('EXP', './logs/dsrl_airbot'), expname)
+    # orbax checkpoint backend (used by save_checkpoint) requires an absolute path,
+    # so wrap with abspath to tolerate EXP being relative (e.g. "./logs/...").
+    outputdir = os.path.abspath(os.path.join(os.environ.get('EXP', './logs/dsrl_airbot'), expname))
     variant.outputdir = outputdir
     if not os.path.exists(outputdir):
         os.makedirs(outputdir)
