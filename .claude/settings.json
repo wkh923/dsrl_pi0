@@ -20,7 +20,9 @@
       "Bash(grep -r \"actions\\\\[t\\\\]\" /home/jpy/dsrl_pi0/examples/train_utils_*.py)",
       "Read(//home/jpy/RM/airbot/airbot-VLA-RL/**)",
       "Read(//home/jpy/.ssh/**)",
-      "Bash(ssh -T git@github.com)"
+      "Bash(ssh -T git@github.com)",
+      "Bash(/home/jpy/anaconda3/envs/dsrl_pi0/bin/python)",
+      "Bash(PYTHONPATH=/home/jpy/dsrl_pi0:/home/jpy/dsrl_pi0/Airbot /home/jpy/anaconda3/envs/dsrl_pi0/bin/python)"
     ]
   }
 }

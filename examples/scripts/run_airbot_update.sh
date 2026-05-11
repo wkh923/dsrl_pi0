@@ -1,9 +1,21 @@
 #!/bin/bash
-# DSRL training on Airbot robot (single-arm example)
+# DSRL training on Airbot robot — VARIANT with extended random-noise warmup phase
+#
+# Difference from run_airbot.sh:
+#   * --num_random_rollouts 20  → first 20 rollouts use random Gaussian noise
+#                                 (instead of just rollout 1). SAC is still
+#                                 trained during these rollouts (240 grad
+#                                 steps per rollout) but does not yet steer
+#                                 pi0. The 5000-step warmup is moved from
+#                                 "after rollout 1" to "after rollout 20"
+#                                 (decision: option B).
+#   * --prefix dsrl_pi0_airbot_warm20  → distinct W&B / output dir naming.
+#
+# Same W&B project as run_airbot.sh so you can compare runs side-by-side.
 #
 # Prerequisites:
-# 1. SFT checkpoint from VLA-RL (e.g., checkpoints/put_cup/9000)
-# 2. Task config.py from VLA-RL (e.g., data/put_cup/config.py)
+# 1. SFT checkpoint from VLA-RL
+# 2. Task config.py from VLA-RL
 # 3. airbot_py SDK installed
 # 4. airbot_data_collection package installed (from VLA-RL/airbot-data/data-collection)
 # 5. dsrl_pi0's openpi installed (pip install -e openpi)
@@ -46,12 +58,18 @@ INSTRUCTION="pick eraser out of box"
 # Defaults below mirror Airbot-VLA-RL/airbot/deploy/airbot_inference_sync.py.
 RESET_ACTION="-0.001618 -1.036 0.842 -1.615 0.634 1.695 0.0 -0.001618 -1.036 0.842 -1.615 0.634 1.695 0.0"
 
+# Number of initial rollouts that use random Gaussian noise (rather than SAC
+# output) to drive pi0. Each rollout still triggers 240 SAC gradient steps,
+# so SAC critic accumulates ~9560 updates (5000 warmup + 19*240) on a richer
+# buffer (~160 transitions) before its own outputs start steering pi0.
+NUM_RANDOM_ROLLOUTS=20
+
 # ============================================================
 
 python3 examples/launch_train_airbot.py \
 --algorithm pixel_sac \
 --env airbot \
---prefix dsrl_pi0_airbot \
+--prefix dsrl_pi0_airbot_warm20 \
 --wandb_project ${proj_name} \
 --batch_size 256 \
 --discount 0.99 \
@@ -62,10 +80,11 @@ python3 examples/launch_train_airbot.py \
 --checkpoint_interval 5000 \
 --multi_grad_step 30 \
 --resize_image 128 \
---action_magnitude 1.5 \
+--action_magnitude 2.5 \
 --query_freq 25 \
 --hidden_dims 1024 \
 --num_qs 2 \
+--num_random_rollouts ${NUM_RANDOM_ROLLOUTS} \
 --pi0_mode local \
 --pi0_config_path "${PI0_CONFIG_PATH}" \
 --pi0_checkpoint_dir "${PI0_CHECKPOINT_DIR}" \

@@ -80,19 +80,21 @@ def extract_observation(robot, obs_raw, airbot_config):
 
 
 def trajwise_alternating_training_loop(variant, agent, robot, online_replay_buffer, replay_buffer, wandb_logger,
-                                       shard_fn=None, agent_dp=None, airbot_config=None):
+                                       shard_fn=None, agent_dp=None, airbot_config=None,
+                                       initial_i=0, initial_total_num_traj=0, initial_total_env_steps=0):
     replay_buffer_iterator = replay_buffer.get_iterator(variant.batch_size)
     if shard_fn is not None:
         replay_buffer_iterator = map(shard_fn, replay_buffer_iterator)
 
-    i = 0
-    total_env_steps = 0
-    total_num_traj = 0
-    wandb_logger.log({'num_online_samples': 0}, step=i)
-    wandb_logger.log({'num_online_trajs': 0}, step=i)
-    wandb_logger.log({'env_steps': 0}, step=i)
+    # Counters resume from the values loaded by main() (all 0 for a fresh run).
+    i = initial_i
+    total_env_steps = initial_total_env_steps
+    total_num_traj = initial_total_num_traj
+    wandb_logger.log({'num_online_samples': len(online_replay_buffer)}, step=i)
+    wandb_logger.log({'num_online_trajs': total_num_traj}, step=i)
+    wandb_logger.log({'env_steps': total_env_steps}, step=i)
 
-    with tqdm(total=variant.max_steps, initial=0) as pbar:
+    with tqdm(total=variant.max_steps, initial=i) as pbar:
         while i <= variant.max_steps:
             traj = collect_traj(variant, agent, robot, i, agent_dp, wandb_logger, total_num_traj, airbot_config)
             if traj.get('aborted'):
@@ -106,7 +108,13 @@ def trajwise_alternating_training_loop(variant, agent, robot, online_replay_buff
             print('online buffer num traj:', total_num_traj)
             print('total env steps:', total_env_steps)
 
-            if i == 0:
+            # Warmup (5000 grad steps on the bootstrap data) is triggered at the END
+            # of the random-noise phase, i.e. immediately after rollout
+            # `num_random_rollouts`. Default num_random_rollouts=1 reproduces the
+            # original DSRL behavior (warmup right after rollout 1). Setting it
+            # to e.g. 20 means the buffer accumulates ~160 transitions across 20
+            # random-noise rollouts before warmup, then SAC takes over.
+            if total_num_traj == variant.num_random_rollouts:
                 num_gradsteps = 5000
             else:
                 num_gradsteps = len(traj["rewards"]) * variant.multi_grad_step
@@ -148,6 +156,28 @@ def trajwise_alternating_training_loop(variant, agent, robot, online_replay_buff
                     if variant.checkpoint_interval != -1:
                         if i % variant.checkpoint_interval == 0:
                             agent.save_checkpoint(variant.outputdir, i, variant.checkpoint_interval)
+
+            # === Crash-resilient state save (only when --resume_dir is in use) ===
+            # Save replay buffer + counters + agent RNG + SAC ckpt at the end of
+            # every rollout's SAC update phase. On crash + auto-restart by
+            # run_airbot_resilient.sh, training resumes from the last saved state.
+            # Saves are atomic (tmp + os.replace) so a partial write doesn't
+            # corrupt the previous good state.
+            if getattr(variant, 'resume_dir', ''):
+                from examples.airbot.state_persist import save_buffer, save_meta
+                save_buffer(variant.outputdir, online_replay_buffer)
+                save_meta(
+                    variant.outputdir,
+                    i=i,
+                    total_num_traj=total_num_traj,
+                    total_env_steps=total_env_steps,
+                    agent_rng=agent._rng,
+                )
+                # Also force a SAC checkpoint every rollout (default cadence is
+                # every checkpoint_interval=5000 SAC steps ≈ 21 rollouts; that
+                # would lose ~21 rollouts of SAC training on crash). One extra
+                # ckpt write per rollout costs ~5 MB / ~1 second.
+                agent.save_checkpoint(variant.outputdir, i, variant.checkpoint_interval)
 
 
 def add_online_data_to_buffer(variant, traj, online_replay_buffer):
@@ -275,8 +305,12 @@ def collect_traj(variant, agent, robot, i, agent_dp=None, wandb_logger=None, tra
                     'state': qpos[np.newaxis, ..., np.newaxis],
                 }
 
-                if i == 0:
-                    # Initial data collection: sample from standard Gaussian noise
+                if traj_id < variant.num_random_rollouts:
+                    # Random-noise phase: sample standard Gaussian (like the
+                    # original i==0 branch). With num_random_rollouts=20, the
+                    # first 20 rollouts all collect data using random noise so
+                    # SAC has a richer buffer (~160 transitions) to learn from
+                    # before its own noise output starts steering pi0.
                     noise = jax.random.normal(key, (1, *agent.action_chunk_shape))
                     noise_repeat = jax.numpy.repeat(
                         noise[:, -1:, :], action_horizon - noise.shape[1], axis=1

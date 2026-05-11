@@ -26,6 +26,11 @@ if __name__ == '__main__':
     parser.add_argument('--multi_grad_step', default=30, help='Number of gradient steps per env step (UTD)', type=int)
     parser.add_argument('--resize_image', default=128, help='the size of image for SAC agent', type=int)
     parser.add_argument('--query_freq', default=25, help='how often to query pi0 (in env steps)', type=int)
+    parser.add_argument('--num_random_rollouts', default=1, type=int,
+                        help='Number of initial rollouts that use random Gaussian noise (instead of SAC output) '
+                             'as the steering noise for pi0. SAC is still trained during these rollouts. '
+                             'The 5000-step warmup happens at the END of the random-noise phase '
+                             '(i.e. after rollout num_random_rollouts). Default 1 = original DSRL behavior.')
     parser.add_argument('--instruction', default='', help='language instruction for the task')
     parser.add_argument('--restore_path', default='', help='path to restore SAC checkpoint from')
 
@@ -48,6 +53,12 @@ if __name__ == '__main__':
                         help='Camera serial numbers or device indices')
     parser.add_argument('--max_timesteps', default=200, help='Max timesteps per episode', type=int)
     parser.add_argument('--control_rate', default=20, help='Robot control rate in Hz', type=int)
+    parser.add_argument('--resume_dir', default='', type=str,
+                        help='If non-empty, use this directory as outputdir AND auto-load '
+                             'training state (replay buffer + counters + agent RNG + '
+                             'latest SAC checkpoint) from it. Empty = original behavior '
+                             '(new timestamped exp dir, no resume / no state save). Used '
+                             'by run_airbot_resilient.sh for crash-resilient training.')
     parser.add_argument('--reset_action', nargs='+', default=[], type=float,
                         help='Joint pose to auto-reset to between episodes. '
                              '7 floats per arm: [j1..j6, gripper]. '

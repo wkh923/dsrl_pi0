@@ -83,12 +83,28 @@ def main(variant):
     else:
         expname = create_exp_name(variant.prefix, seed=variant.seed)
 
-    # orbax checkpoint backend (used by save_checkpoint) requires an absolute path,
-    # so wrap with abspath to tolerate EXP being relative (e.g. "./logs/...").
-    outputdir = os.path.abspath(os.path.join(os.environ.get('EXP', './logs/dsrl_airbot'), expname))
+    # outputdir logic depends on whether --resume_dir is set:
+    #   * --resume_dir non-empty: use it as outputdir (no timestamp suffix).
+    #     If state files exist there, we'll auto-load buffer + counters + RNG +
+    #     latest SAC ckpt below. Used by run_airbot_resilient.sh for
+    #     crash-resilient training across multiple python restarts.
+    #   * --resume_dir empty: original behavior — fresh timestamped dir.
+    # orbax checkpoint backend (used by save_checkpoint) requires an absolute path.
+    from examples.airbot.state_persist import has_state, load_meta, load_buffer
+
+    if variant.resume_dir:
+        outputdir = os.path.abspath(variant.resume_dir)
+        os.makedirs(outputdir, exist_ok=True)
+        is_resuming = has_state(outputdir)
+        if is_resuming:
+            print(f'Resuming training from existing state at {outputdir}')
+        else:
+            print(f'No prior state at {outputdir}, starting fresh in persistent dir')
+    else:
+        outputdir = os.path.abspath(os.path.join(os.environ.get('EXP', './logs/dsrl_airbot'), expname))
+        os.makedirs(outputdir, exist_ok=True)
+        is_resuming = False
     variant.outputdir = outputdir
-    if not os.path.exists(outputdir):
-        os.makedirs(outputdir)
     print('writing to output dir', outputdir)
 
     # Persist the training variant so eval_airbot.py can reconstruct the SAC
@@ -180,11 +196,43 @@ def main(variant):
     replay_buffer = online_replay_buffer
     replay_buffer.seed(variant.seed)
 
+    # ---- Resume training state (if --resume_dir is set and state exists) ----
+    initial_i = 0
+    initial_total_num_traj = 0
+    initial_total_env_steps = 0
+    if is_resuming:
+        # 1. Load buffer (in-place into the empty buffer just created above)
+        load_buffer(outputdir, online_replay_buffer)
+
+        # 2. Load metadata (counters + agent JAX RNG)
+        meta = load_meta(outputdir)
+        initial_i = meta['i']
+        initial_total_num_traj = meta['total_num_traj']
+        initial_total_env_steps = meta['total_env_steps']
+        agent._rng = meta['agent_rng']
+
+        # 3. Restore SAC checkpoint (uses flax.training.checkpoints under the hood)
+        from flax.training.checkpoints import latest_checkpoint
+        latest = latest_checkpoint(outputdir, prefix='checkpoint')
+        if latest is not None:
+            agent.restore_checkpoint(latest)
+            print(f'Restored SAC checkpoint: {latest}')
+        else:
+            print('Warning: state files exist but no SAC checkpoint found; '
+                  'SAC params remain freshly-initialized.')
+
+        print(f'Resumed: i={initial_i}, total_num_traj={initial_total_num_traj}, '
+              f'total_env_steps={initial_total_env_steps}, '
+              f'buffer_size={len(online_replay_buffer)}')
+
     # ---- Start DSRL training ----
     try:
         trajwise_alternating_training_loop(
             variant, agent, robot, online_replay_buffer, replay_buffer, wandb_logger,
-            shard_fn=shard_fn, agent_dp=agent_dp, airbot_config=airbot_config
+            shard_fn=shard_fn, agent_dp=agent_dp, airbot_config=airbot_config,
+            initial_i=initial_i,
+            initial_total_num_traj=initial_total_num_traj,
+            initial_total_env_steps=initial_total_env_steps,
         )
     finally:
         # Release gRPC / RealSense handles even on Ctrl+C or exception.
