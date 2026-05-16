@@ -56,9 +56,9 @@ DEFAULT_Z_MIN: float = 0.002
 # Keys must match the arm names used by callers (RobotConfig.robot_groups
 # is typically ["left", "right"]; single-arm setups use ["follow"]).
 DEFAULT_Z_MIN_PER_ARM: dict[str, float] = {
-    "follow": 0.028,
-    "left":   0.028,
-    "right":  0.028,
+    "follow": 0.002,
+    "left":   0.002,
+    "right":  0.002,
 }
 
 

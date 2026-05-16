@@ -1,4 +1,6 @@
 import math
+import threading
+import time
 import traceback
 from typing import Union, Dict, Optional
 import numpy as np
@@ -14,6 +16,7 @@ from pyrealsense2 import stream as RSStream  # noqa: N812
 from pyrealsense2 import align as RSAlign  # noqa: N812
 from pyrealsense2 import camera_info as RSCameraInfo  # noqa: N812
 from pyrealsense2 import context as RSContext  # noqa: N812
+from pyrealsense2 import option as RSOption  # noqa: N812
 
 
 def find_camera_indices(
@@ -61,6 +64,23 @@ def find_camera_device_ids(
 class IntelRealSenseCameraConfig(CameraRGBDConfig):
     force_hardware_reset: bool = True
 
+    # Lock exposure / gain / white balance so RGB looks consistent across
+    # rollouts. Auto-exposure left enabled previously caused periodic ~2 s
+    # `wait_for_frames` stalls every ~16 control steps because AE re-metering
+    # paused frame production on one of the cameras. Mirrors the lock applied
+    # in VLA-RL's data_collection/common/devices/cameras/intelrealsense.py.
+    # Tune via realsense-viewer for your room lighting if defaults look off.
+    enable_auto_exposure: bool = False
+    exposure_value: int = 200          # ×100 μs (= 20 ms)
+    gain_value: int = 8
+    enable_auto_white_balance: bool = False
+    white_balance_value: int = 3270    # Kelvin; only used when auto_wb=False.
+                                        # Measured via auto-WB convergence on
+                                        # base camera 243222074218 under the
+                                        # lab's warm indoor lighting. Re-probe
+                                        # with /tmp/probe_wb.py if room
+                                        # lighting changes or colors look off.
+
     def model_post_init(self, context):
         at_least_one_is_not_none = (
             self.fps is not None or self.width is not None or self.height is not None
@@ -90,8 +110,42 @@ class IntelRealSenseCamera(Sensor):
         self.height = config.height
         self._rs_pipe = None
         self.logs = {}
+        # Latest-frame cache, populated by librealsense's worker thread via
+        # _on_frame callback. capture_observation() reads from this cache
+        # instead of calling wait_for_frames(), which was deterministically
+        # deadlocking after 16 successful calls in dsrl_pi0's Python env.
+        self._latest_frame_lock = threading.Lock()
+        self._latest_frame = None
         self._connect()
         return True
+
+    def _on_frame(self, frame):
+        """Invoked from librealsense's worker thread on each new frameset.
+
+        The callback delivers a base ``rs.frame``; cast it to a
+        ``composite_frame`` (frameset) so downstream code can call
+        ``get_color_frame() / get_depth_frame()``. Single-stream pipelines
+        deliver a non-frameset ``video_frame`` which we keep as-is and
+        handle on the read side.
+
+        Must call ``frame.keep()`` to extend the frame's lifetime past this
+        callback return — otherwise librealsense reclaims it to the pool
+        and the Python-side reference becomes invalid.
+        """
+        try:
+            # Cast to composite_frame when the pipeline is multi-stream.
+            try:
+                if frame.is_frameset():
+                    frame = frame.as_frameset()
+            except Exception:
+                pass  # leave as-is; capture_observation handles either type
+            frame.keep()
+            with self._latest_frame_lock:
+                self._latest_frame = frame
+        except Exception as e:
+            # Don't let an exception in the callback kill the pipeline thread.
+            print(f"[IntelRealSenseCamera({self.config.camera_index})] "
+                  f"frame callback exception: {e}")
 
     def _connect(self):
         rs_config = RSConfig()
@@ -120,7 +174,41 @@ class IntelRealSenseCamera(Sensor):
 
         self._rs_pipe = RSPipeline()
         try:
-            profile = self._rs_pipe.start(rs_config)
+            # Start with frame-callback variant: librealsense delivers
+            # framesets to self._on_frame from its own worker thread.
+            # This bypasses wait_for_frames / poll_for_frames entirely,
+            # avoiding the 16-call deadlock observed with the polling API.
+            profile = self._rs_pipe.start(rs_config, self._on_frame)
+            # Lock exposure / gain / WB so RGB is consistent across rollouts
+            # and to avoid the periodic AE-re-metering stalls (every ~16 ctrl
+            # steps in `wait_for_frames`) observed with defaults.
+            try:
+                color_sensor = profile.get_device().first_color_sensor()
+                color_sensor.set_option(
+                    RSOption.enable_auto_exposure,
+                    1 if self.config.enable_auto_exposure else 0,
+                )
+                if not self.config.enable_auto_exposure:
+                    color_sensor.set_option(RSOption.exposure, self.config.exposure_value)
+                    color_sensor.set_option(RSOption.gain, self.config.gain_value)
+                color_sensor.set_option(
+                    RSOption.enable_auto_white_balance,
+                    1 if self.config.enable_auto_white_balance else 0,
+                )
+                if not self.config.enable_auto_white_balance:
+                    color_sensor.set_option(
+                        RSOption.white_balance, self.config.white_balance_value
+                    )
+                # Latest-frame-only queue: drop older buffered frames at the
+                # producer side. Default 16 → after 16 successful reads the
+                # pipeline state machine gets stuck in dsrl_pi0's Python env
+                # (16-read failure pattern observed across single-cam, 3-cam,
+                # every-step, every-5-step configurations). Setting to 1
+                # eliminates that buffer entirely; we always get the latest
+                # frame, which is what a real-time control loop wants anyway.
+                color_sensor.set_option(RSOption.frames_queue_size, 1)
+            except Exception as e:
+                print(f"[IntelRealSenseCamera] Failed to lock exposure/WB: {e}")
             is_camera_open = True
         except RuntimeError:
             is_camera_open = False
@@ -174,28 +262,41 @@ class IntelRealSenseCamera(Sensor):
     def capture_observation(
         self, timeout: Optional[float] = None
     ) -> Dict[str, np.ndarray]:
-        """Capture an observation from the camera.
+        """Read the latest frame cached by the librealsense callback thread.
+
         Returns:
             A dictionary containing the captured images.
         Raises:
-            OSError: If the image cannot be captured.
+            OSError: If no frame has been received within ``timeout`` seconds.
         """
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                frame = self._rs_pipe.wait_for_frames(timeout_ms=1000)
+        # Wait briefly for the callback thread to have populated _latest_frame.
+        # In steady state this loop spins at most once (frame is already cached
+        # at 30 Hz). The deadline only matters on the very first call after
+        # _connect() and on real pipeline death.
+        deadline_s = timeout if timeout else 5.0
+        t_start = time.monotonic()
+        while True:
+            with self._latest_frame_lock:
+                frame = self._latest_frame
+            if frame is not None:
                 break
-            except RuntimeError:
-                if attempt == max_retries - 1:
-                    raise
-                try:
-                    self._rs_pipe.stop()
-                except Exception:
-                    pass
-                self._connect()
-        if self.config.align_depth:
-            frame = self.align.process(frame)
-        color_frame = frame.get_color_frame()
+            if time.monotonic() - t_start > deadline_s:
+                raise OSError(
+                    f"No frame received within {deadline_s}s from "
+                    f"IntelRealSenseCamera({self.config.camera_index})"
+                )
+            time.sleep(0.001)
+
+        # Normalize: cached frame may be a composite_frame (frameset) for
+        # multi-stream pipelines, or a single video_frame for color-only.
+        if hasattr(frame, 'get_color_frame'):
+            # Composite frameset path.
+            if self.config.align_depth:
+                frame = self.align.process(frame)
+            color_frame = frame.get_color_frame()
+        else:
+            # Single-stream pipeline: the frame itself is the color frame.
+            color_frame = frame
         if not color_frame:
             raise OSError(
                 f"Can't capture color image from IntelRealSenseCamera({self.camera_index})."

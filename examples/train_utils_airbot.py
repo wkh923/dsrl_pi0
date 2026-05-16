@@ -81,7 +81,8 @@ def extract_observation(robot, obs_raw, airbot_config):
 
 def trajwise_alternating_training_loop(variant, agent, robot, online_replay_buffer, replay_buffer, wandb_logger,
                                        shard_fn=None, agent_dp=None, airbot_config=None,
-                                       initial_i=0, initial_total_num_traj=0, initial_total_env_steps=0):
+                                       initial_i=0, initial_total_num_traj=0, initial_total_env_steps=0,
+                                       rm=None):
     replay_buffer_iterator = replay_buffer.get_iterator(variant.batch_size)
     if shard_fn is not None:
         replay_buffer_iterator = map(shard_fn, replay_buffer_iterator)
@@ -96,7 +97,7 @@ def trajwise_alternating_training_loop(variant, agent, robot, online_replay_buff
 
     with tqdm(total=variant.max_steps, initial=i) as pbar:
         while i <= variant.max_steps:
-            traj = collect_traj(variant, agent, robot, i, agent_dp, wandb_logger, total_num_traj, airbot_config)
+            traj = collect_traj(variant, agent, robot, i, agent_dp, wandb_logger, total_num_traj, airbot_config, rm=rm)
             if traj.get('aborted'):
                 # User quit at the start prompt — skip without polluting the buffer.
                 print("Trajectory aborted; skipping update.")
@@ -210,7 +211,7 @@ def add_online_data_to_buffer(variant, traj, online_replay_buffer):
     online_replay_buffer.increment_traj_counter()
 
 
-def collect_traj(variant, agent, robot, i, agent_dp=None, wandb_logger=None, traj_id=None, airbot_config=None):
+def collect_traj(variant, agent, robot, i, agent_dp=None, wandb_logger=None, traj_id=None, airbot_config=None, rm=None):
     query_frequency = variant.query_freq
     instruction = variant.instruction
     max_timesteps = airbot_config['max_timesteps']
@@ -223,6 +224,11 @@ def collect_traj(variant, agent, robot, i, agent_dp=None, wandb_logger=None, tra
     action_list = []
     obs_list = []
     image_list = []
+    # Transient per-episode frame buffer for RM dense rewards (one frame per env
+    # step from the RM camera). Discarded after RM scoring — never enters the
+    # replay buffer. Only collected when --use_rm is set.
+    rm_frames = []
+    rm_camera = getattr(variant, 'rm_camera', None) if rm is not None else None
     is_success = False
     t = -1
 
@@ -277,6 +283,10 @@ def collect_traj(variant, agent, robot, i, agent_dp=None, wandb_logger=None, tra
             first_cam = airbot_config['camera_names'][0]
             if first_cam in curr_obs['images']:
                 image_list.append(curr_obs['images'][first_cam])
+            # Per-env-step RM frame collection (transient — discarded after RM
+            # scoring at episode end; does not enter the replay buffer).
+            if rm is not None and rm_camera is not None and rm_camera in curr_obs['images']:
+                rm_frames.append(curr_obs['images'][rm_camera])
 
             _t0 = time.time()
             request_data = obs_to_pi0_input(curr_obs, airbot_config, instruction)
@@ -421,19 +431,44 @@ def collect_traj(variant, agent, robot, i, agent_dp=None, wandb_logger=None, tra
         print('Rollout Done')
 
     finally:
-        # Assign sparse rewards
+        # Assign sparse rewards (default / RM-disabled / RM-failure fallback)
+        query_steps = len(action_list)
         if is_success:
-            query_steps = len(action_list)
             rewards = np.concatenate([-np.ones(query_steps - 1), [0]])
             masks = np.concatenate([np.ones(query_steps - 1), [0]])
         else:
-            query_steps = len(action_list)
             rewards = -np.ones(query_steps)
             masks = np.ones(query_steps)
+
+        rm_used = False
+        rm_hit_count = 0
+        if rm is not None and query_steps > 0 and len(rm_frames) > 0:
+            try:
+                rm_rewards = rm.compute_rewards(rm_frames, num_query_steps=query_steps)
+                rewards = rm_rewards.astype(np.float32)
+                # User-labeled success overrides reward[-1]: even if RM didn't
+                # hit on the final query step, the operator's success label
+                # forces it to 0. On failure, keep the RM result.
+                if is_success:
+                    rewards[-1] = 0.0
+                rm_used = True
+                rm_hit_count = int((rewards == 0.0).sum())
+                print(f"[RM] rewards={rewards.tolist()} hits={rm_hit_count}/{query_steps} "
+                      f"is_success={int(is_success)}")
+            except Exception as e:
+                print(f"[RM] compute_rewards failed: {e}; falling back to sparse reward")
 
         if wandb_logger is not None:
             wandb_logger.log({'is_success': int(is_success)}, step=i)
             wandb_logger.log({'total_num_traj': traj_id}, step=i)
+            wandb_logger.log({'rollout/user_success': float(is_success)}, step=i)
+            if rm_used:
+                wandb_logger.log({
+                    'rollout/rm_hit_count': rm_hit_count,
+                    'rollout/rm_mean_reward': float(rewards.mean()),
+                    'rollout/rm_max_reached_progress': float(
+                        getattr(rm, 'last_max_reached_progress', 0.0)),
+                }, step=i)
 
         # Save rollout video
         if len(image_list) > 0:

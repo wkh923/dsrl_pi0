@@ -67,6 +67,31 @@ if __name__ == '__main__':
     parser.add_argument('--reset_wait_time', default=3.0, type=float,
                         help='Seconds to wait after sending reset_action (planning mode is blocking but server-side completion may lag).')
 
+    # Reward Model (RM) — BinaryProgressRewardModel dense rewards
+    parser.add_argument('--use_rm', action='store_true',
+                        help='Enable dense rewards from BinaryProgressRewardModel '
+                             '(Reward-Model-MVP). When set, the 8 per-rollout '
+                             'transition rewards are derived from RM hits '
+                             '(0.0 hit / -1.0 miss). If --use_rm is not set, '
+                             'the original sparse user-label reward is kept.')
+    parser.add_argument('--rm_demo_path', default='', type=str,
+                        help='Folder containing one successful rollout as '
+                             'frame_000.jpg, frame_001.jpg, ... (or .png). '
+                             'Required when --use_rm is set.')
+    parser.add_argument('--rm_camera', default='base_0_rgb', type=str,
+                        help='Which camera to use as RM input (must be one of '
+                             '--camera_names).')
+    parser.add_argument('--rm_threshold_offset', default=0.5, type=float,
+                        help='per_clip_threshold = max_self_sim - threshold_offset. '
+                             '0.5 is the RM library default. Increase to make hits '
+                             'rarer (stricter), decrease to make hits more common.')
+    parser.add_argument('--rm_repo_path',
+                        default='/home/jpy/RM/Airbot-VLA-RL/Reward-Model-MVP',
+                        type=str,
+                        help='Path to the Reward-Model-MVP repo root. The '
+                             '<repo>/reward_model_baseline/MetaWorld dir is '
+                             'added to sys.path so RewardModels.* is importable.')
+
     # SAC hyperparameters tuned for real robot (following train_real.py / run_real.sh)
     train_args_dict = dict(
         actor_lr=1e-4,

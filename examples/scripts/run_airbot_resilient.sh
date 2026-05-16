@@ -17,25 +17,33 @@ proj_name=DSRL_pi0_Airbot
 device_id=0
 seed=42
 
+# Task tag — appears in RESUME_DIR so state stays isolated per task.
+# Change it when switching tasks (e.g. pick_eraser_out_of_box → pour_water);
+# otherwise the new task will resume from the old task's buffer.
+# TASK_TAG=pick_eraser_out_of_box
+TASK_TAG=please_fold_the_clothes
+
 export EXP=./logs/$proj_name
 export CUDA_VISIBLE_DEVICES=$device_id
 export XLA_PYTHON_CLIENT_PREALLOCATE=false
 export PYTHONPATH=.:./Airbot
 
-# 持久化 dir（不带 timestamp） — 跨多次重启共享
-RESUME_DIR="${EXP}/persistent_warm20_s${seed}"
+# 持久化 dir（不带 timestamp） — 跨多次重启共享。TASK_TAG 隔离不同任务。
+RESUME_DIR="${EXP}/persistent_${TASK_TAG}_warm20_s${seed}"
 mkdir -p "$RESUME_DIR"
 
 # ============================================================
 # Fill in your configuration below (与 run_airbot_update.sh 保持同步)
 # ============================================================
 
-PI0_CONFIG_PATH="/home/jpy/RM/Airbot-VLA-RL/VLA/airbot-pi0/openpi/data/pick_eraser_out_of_box/config.py"
-PI0_CHECKPOINT_DIR="/home/jpy/RM/Airbot-VLA-RL/VLA/airbot-pi0/checkpoints/pick_eraser_out_of_box/pick_eraser/30000"
+# PI0_CONFIG_PATH="/home/jpy/RM/Airbot-VLA-RL/VLA/airbot-pi0/openpi/data/pick_eraser_out_of_box/config.py"
+PI0_CONFIG_PATH="/home/jpy/RM/Airbot-VLA-RL/VLA/airbot-pi0/openpi/data/fold_clothes/config.py"
+# PI0_CHECKPOINT_DIR="/home/jpy/RM/Airbot-VLA-RL/VLA/airbot-pi0/checkpoints/pick_eraser_out_of_box/pick_eraser/30000"
+PI0_CHECKPOINT_DIR="/home/jpy/RM/Airbot-VLA-RL/VLA/airbot-pi0/checkpoints/fold_clothes/fold_clothes/49999"
 ROBOT_PORTS="50051 50053"  # dual-arm
 CAMERA_INDEX="243222074218 243522071794 243222071389"
 CAMERA_NAMES="base_0_rgb left_wrist_0_rgb right_wrist_0_rgb"
-INSTRUCTION="pick eraser out of box"
+INSTRUCTION="please fold the clothes"
 RESET_ACTION="-0.001618 -1.036 0.842 -1.615 0.634 1.695 0.0 -0.001618 -1.036 0.842 -1.615 0.634 1.695 0.0"
 NUM_RANDOM_ROLLOUTS=10
 
@@ -74,8 +82,8 @@ while true; do
     --robot_ports ${ROBOT_PORTS} \
     --camera_names ${CAMERA_NAMES} \
     --camera_index ${CAMERA_INDEX} \
-    --max_timesteps 200 \
-    --control_rate 20 \
+    --max_timesteps 1000 \
+    --control_rate 30 \
     --reset_action ${RESET_ACTION} \
     --instruction "${INSTRUCTION}" \
     --resume_dir "${RESUME_DIR}"

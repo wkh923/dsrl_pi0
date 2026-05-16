@@ -22,7 +22,14 @@
       "Read(//home/jpy/.ssh/**)",
       "Bash(ssh -T git@github.com)",
       "Bash(/home/jpy/anaconda3/envs/dsrl_pi0/bin/python)",
-      "Bash(PYTHONPATH=/home/jpy/dsrl_pi0:/home/jpy/dsrl_pi0/Airbot /home/jpy/anaconda3/envs/dsrl_pi0/bin/python)"
+      "Bash(PYTHONPATH=/home/jpy/dsrl_pi0:/home/jpy/dsrl_pi0/Airbot /home/jpy/anaconda3/envs/dsrl_pi0/bin/python)",
+      "Bash(sed -n '85,180p' /home/jpy/dsrl_pi0/airbot_data_collection/common/devices/cameras/intelrealsense.py)",
+      "Bash(/home/jpy/anaconda3/envs/dsrl_pi0/bin/python -c ' *)",
+      "Bash(sed -n '1,80p' /home/jpy/RM/Airbot-VLA-RL/SERL/serl_robot_infra/airbot_env/envs/progress_reward_wrapper.py)",
+      "Bash(sed -n '80,180p' /home/jpy/RM/Airbot-VLA-RL/SERL/serl_robot_infra/airbot_env/envs/progress_reward_wrapper.py)",
+      "Bash(echo \"=== F. async_drawer_drq.py: patch transitions + flush 处理（关键的 deferred-insert 逻辑）===\" *)",
+      "Read(//home/jpy/RM/**)",
+      "Read(//home/jpy/**)"
     ]
   }
 }

@@ -225,6 +225,26 @@ def main(variant):
               f'total_env_steps={initial_total_env_steps}, '
               f'buffer_size={len(online_replay_buffer)}')
 
+    # ---- Initialize Reward Model (RM) for dense rewards (optional) ----
+    rm = None
+    if getattr(variant, 'use_rm', False):
+        if not variant.rm_demo_path:
+            raise ValueError(
+                "--use_rm is set but --rm_demo_path is empty. Provide a folder "
+                "of frame_*.jpg from one successful rollout.")
+        if variant.rm_camera not in variant.camera_names:
+            raise ValueError(
+                f"--rm_camera={variant.rm_camera!r} not in --camera_names={variant.camera_names}")
+        from examples.airbot.rm_wrapper import AirbotRewardModel
+        rm = AirbotRewardModel(
+            demo_path=variant.rm_demo_path,
+            rm_repo_path=variant.rm_repo_path,
+            max_timesteps=variant.max_timesteps,
+            query_freq=variant.query_freq,
+            num_query_steps=variant.max_timesteps // variant.query_freq,
+            threshold_offset=variant.rm_threshold_offset,
+        )
+
     # ---- Start DSRL training ----
     try:
         trajwise_alternating_training_loop(
@@ -233,6 +253,7 @@ def main(variant):
             initial_i=initial_i,
             initial_total_num_traj=initial_total_num_traj,
             initial_total_env_steps=initial_total_env_steps,
+            rm=rm,
         )
     finally:
         # Release gRPC / RealSense handles even on Ctrl+C or exception.
@@ -240,3 +261,8 @@ def main(variant):
             robot.shutdown()
         except Exception as e:
             logging.warning(f"robot.shutdown() failed: {e}")
+        if rm is not None:
+            try:
+                rm.close()
+            except Exception as e:
+                logging.warning(f"rm.close() failed: {e}")

@@ -24,11 +24,10 @@ export PYTHONPATH=.:./Airbot
 
 # RESET_ACTION="-0.001618136651813984 -1.0361113548278809 0.8421794176101685 -1.6158959865570068 0.6345375776290894 1.6957406997680664 0.0"
 
-# Path to your VLA-RL task config.py (defines TASK_NAME, CAMERA_TOPICS, DELTA_ACTION_MASK, etc.)
-PI0_CONFIG_PATH="/home/jpy/RM/Airbot-VLA-RL/VLA/airbot-pi0/openpi/data/pick_eraser_out_of_box/config.py"
-
-# Path to your SFT checkpoint directory
-PI0_CHECKPOINT_DIR="/home/jpy/RM/Airbot-VLA-RL/VLA/airbot-pi0/checkpoints/pick_eraser_out_of_box/pick_eraser/5000"
+# PI0_CONFIG_PATH="/home/jpy/RM/Airbot-VLA-RL/VLA/airbot-pi0/openpi/data/pick_eraser_out_of_box/config.py"
+PI0_CONFIG_PATH="/home/jpy/RM/Airbot-VLA-RL/VLA/airbot-pi0/openpi/data/fold_clothes/config.py"
+# PI0_CHECKPOINT_DIR="/home/jpy/RM/Airbot-VLA-RL/VLA/airbot-pi0/checkpoints/pick_eraser_out_of_box/pick_eraser/30000"
+PI0_CHECKPOINT_DIR="/home/jpy/RM/Airbot-VLA-RL/VLA/airbot-pi0/checkpoints/fold_clothes/fold_clothes/49999"
 
 # Robot ports (single-arm: one port, dual-arm: two ports)
 ROBOT_PORTS="50051 50053"  # dual-arm
@@ -42,7 +41,8 @@ CAMERA_INDEX="243222074218 243522071794 243222071389"
 CAMERA_NAMES="base_0_rgb left_wrist_0_rgb right_wrist_0_rgb"
 
 # Task instruction
-INSTRUCTION="pick eraser out of box"
+# INSTRUCTION="pick eraser out of box"
+INSTRUCTION="please fold the clothes"
 RESET_ACTION="-0.001618 -1.036 0.842 -1.615 0.634 1.695 0.0 -0.001618 -1.036 0.842 -1.615 0.634 1.695 0.0"
 
 
@@ -71,8 +71,8 @@ python3 examples/eval_airbot.py \
   --instruction "${INSTRUCTION}" \
   --reset_action ${RESET_ACTION} \
   --query_freq 25 \
-  --max_timesteps 200 \
-  --control_rate 20 \
+  --max_timesteps 1000 \
+  --control_rate 30 \
   --num_episodes 10 \
   --output_dir ./logs/eval_airbot_${MODE} \
   ${DSRL_ARGS}
