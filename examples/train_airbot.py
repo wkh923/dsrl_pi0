@@ -243,6 +243,7 @@ def main(variant):
             query_freq=variant.query_freq,
             num_query_steps=variant.max_timesteps // variant.query_freq,
             threshold_offset=variant.rm_threshold_offset,
+            capture_stride=getattr(variant, 'rm_capture_stride', 1),
         )
 
     # ---- Start DSRL training ----

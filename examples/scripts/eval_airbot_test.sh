@@ -24,6 +24,10 @@ export PYTHONPATH=.:./Airbot
 # Shared configuration (keep in sync with run_airbot.sh)
 # ============================================================
 
+# Task tag — change when switching tasks. Used to namespace the demo-candidate
+# save dir (data/rm_demos/<TASK_TAG>/candidates/demo_<timestamp>/).
+TASK_TAG=fold_clothes
+
 # PI0_CONFIG_PATH="/home/jpy/RM/airbot/airbot-VLA-RL/airbot-pi0/openpi/data/pick_and_place/config.py"
 # PI0_CHECKPOINT_DIR="/home/jpy/RM/airbot/airbot-VLA-RL/airbot-pi0/openpi/checkpoints/1-1_pick_and_place/pnp_100/19999"
 
@@ -57,6 +61,14 @@ CAMERA_NAMES="base_0_rgb left_wrist_0_rgb right_wrist_0_rgb"
 INSTRUCTION="please fold the clothes"
 RESET_ACTION="-0.001618 -1.036 0.842 -1.615 0.634 1.695 0.0 -0.001618 -1.036 0.842 -1.615 0.634 1.695 0.0"
 
+# Demo-candidate save dir. On every rollout the user labels SUCCESS ("1"), the
+# frames captured at multiples of 5 env-steps are dumped here as
+#   <SAVE_DEMO_DIR>/demo_<YYYYMMDD_HHMMSS>/frame_<env_step:06d>.jpg + meta.txt
+# Pick the best candidate later, then copy/symlink it to
+#   data/rm_demos/<TASK_TAG>/demo_seed0/
+# for the training scripts to consume.
+SAVE_DEMO_DIR="./data/rm_demos/${TASK_TAG}/candidates"
+
 
 # ============================================================
 
@@ -87,4 +99,6 @@ python3 examples/eval_airbot_test.py \
   --control_rate 30 \
   --num_episodes 10 \
   --output_dir ./logs/eval_airbot_test_${MODE} \
+  --save_demo_dir "${SAVE_DEMO_DIR}" \
+  --save_demo_capture_stride 5 \
   ${DSRL_ARGS}

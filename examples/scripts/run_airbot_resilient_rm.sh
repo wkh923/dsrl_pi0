@@ -108,7 +108,8 @@ while true; do
     --rm_demo_path "${RM_DEMO_PATH}" \
     --rm_camera "${RM_CAMERA}" \
     --rm_threshold_offset ${RM_THRESHOLD_OFFSET} \
-    --rm_repo_path "${RM_REPO_PATH}"
+    --rm_repo_path "${RM_REPO_PATH}" \
+    --rm_capture_stride 5
     code=$?
 
     if [ $code -eq 0 ]; then

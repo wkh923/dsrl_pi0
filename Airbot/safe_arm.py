@@ -48,7 +48,7 @@ _logger = logging.getLogger(__name__)
 
 # Default minimum z height (meters, base frame). Used as a fallback when an
 # arm name is not in ``DEFAULT_Z_MIN_PER_ARM``.
-DEFAULT_Z_MIN: float = 0.002
+DEFAULT_Z_MIN: float = 0.028
 
 # Physical defaults for this machine. Edit these once after calibrating your
 # table / mount; all consumers (play_operator, test_inference_with_spacemouse,
@@ -56,9 +56,9 @@ DEFAULT_Z_MIN: float = 0.002
 # Keys must match the arm names used by callers (RobotConfig.robot_groups
 # is typically ["left", "right"]; single-arm setups use ["follow"]).
 DEFAULT_Z_MIN_PER_ARM: dict[str, float] = {
-    "follow": 0.002,
-    "left":   0.002,
-    "right":  0.002,
+    "follow": 0.028,
+    "left":   0.028,
+    "right":  0.028,
 }
 
 

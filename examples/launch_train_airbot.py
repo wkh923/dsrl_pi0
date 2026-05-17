@@ -91,6 +91,13 @@ if __name__ == '__main__':
                         help='Path to the Reward-Model-MVP repo root. The '
                              '<repo>/reward_model_baseline/MetaWorld dir is '
                              'added to sys.path so RewardModels.* is importable.')
+    parser.add_argument('--rm_capture_stride', default=1, type=int,
+                        help='Env-step interval at which RM rollout frames are '
+                             'captured AND at which demo frames are stored. '
+                             '1 = dense (every env-step); 5 = sparse (every 5 '
+                             'env-steps, matching the saver in eval_airbot_test.py). '
+                             'Must evenly divide frame_stride (10), '
+                             'demo_clip_stride (5), and query_freq.')
 
     # SAC hyperparameters tuned for real robot (following train_real.py / run_real.sh)
     train_args_dict = dict(

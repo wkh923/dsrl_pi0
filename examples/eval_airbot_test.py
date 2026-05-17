@@ -14,6 +14,7 @@ Usage:
       --robot_ports 50051 --camera_names base_0_rgb left_wrist_0_rgb --camera_index 2 4
 """
 import argparse
+import datetime
 import json
 import os
 import sys
@@ -25,6 +26,7 @@ import logging
 
 import jax
 import numpy as np
+from PIL import Image
 from tqdm import tqdm
 from moviepy.editor import ImageSequenceClip
 import tensorflow as tf
@@ -73,6 +75,43 @@ def extract_observation(robot, obs_raw, airbot_config):
                 img = img.astype(np.uint8)
             images[cam_name] = img
     return {"qpos": qpos, "images": images}
+
+
+def save_demo_candidate(image_list, save_demo_dir, capture_stride, env_steps, args):
+    """Save a successful rollout's frames as a demo candidate for RM training.
+
+    image_list[i] is assumed to be the frame captured at env_step
+    i*capture_stride (the rollout loop captures at `t % capture_stride == 0`).
+    Files are written as frame_{env_step:06d}.jpg, matching the sparse naming
+    AirbotRewardModel expects when capture_stride > 1. A small meta.txt is
+    written alongside.
+    """
+    if not save_demo_dir or len(image_list) == 0:
+        return None
+    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    candidate_dir = os.path.join(save_demo_dir, f"demo_{ts}")
+    os.makedirs(candidate_dir, exist_ok=True)
+    for i, img in enumerate(image_list):
+        envstep = i * capture_stride
+        arr = np.asarray(img)
+        if arr.dtype != np.uint8:
+            arr = np.clip(arr, 0, 255).astype(np.uint8)
+        Image.fromarray(arr, mode='RGB').save(
+            os.path.join(candidate_dir, f"frame_{envstep:06d}.jpg"), quality=95)
+    meta_path = os.path.join(candidate_dir, "meta.txt")
+    with open(meta_path, "w", encoding="utf-8") as f:
+        f.write(f"timestamp:        {ts}\n")
+        f.write(f"env_steps_run:    {env_steps}\n")
+        f.write(f"frames_saved:     {len(image_list)}\n")
+        f.write(f"capture_stride:   {capture_stride}  (one frame per N env-steps)\n")
+        f.write(f"last_env_step:    {(len(image_list)-1)*capture_stride}\n")
+        f.write(f"control_rate:     {getattr(args, 'control_rate', '?')}\n")
+        f.write(f"approx_duration:  {env_steps / max(1, getattr(args, 'control_rate', 1)):.2f} s\n")
+        f.write(f"instruction:      {getattr(args, 'instruction', '')!r}\n")
+        f.write(f"pi0_checkpoint:   {getattr(args, 'pi0_checkpoint_dir', '')}\n")
+        f.write(f"mode:             {getattr(args, 'mode', '')}\n")
+    print(f"[demo-saver] saved {len(image_list)} frames → {candidate_dir}")
+    return candidate_dir
 
 
 def run_episode(args, robot, agent_dp, airbot_config, agent=None, rng=None, episode_id=0):
@@ -132,7 +171,14 @@ def run_episode(args, robot, agent_dp, airbot_config, agent=None, rng=None, epis
 
                 first_cam = airbot_config['camera_names'][0]
                 if first_cam in curr_obs['images']:
-                    image_list.append(curr_obs['images'][first_cam])
+                    # RealSense default profile delivers BGR8 but downstream
+                    # code treats it as RGB; swap channels here so saved
+                    # videos AND demo candidates land as true RGB (matches
+                    # DINOv3's training distribution for downstream RM use).
+                    # pi0's own input pipeline still consumes the unmodified
+                    # curr_obs['images'], so SFT inference is unchanged.
+                    frame_rgb = curr_obs['images'][first_cam][..., ::-1].copy()
+                    image_list.append(frame_rgb)
 
             # Inference only at query steps
             if t % query_frequency == 0:
@@ -359,6 +405,16 @@ def main(args):
         print(f"Episode {ep + 1}: {'SUCCESS' if result['is_success'] else 'FAILURE'} "
               f"({result['env_steps']} steps)")
 
+        # Save demo candidate on success (only).
+        if result['is_success'] and args.save_demo_dir:
+            save_demo_candidate(
+                image_list=result['image_list'],
+                save_demo_dir=args.save_demo_dir,
+                capture_stride=args.save_demo_capture_stride,
+                env_steps=result['env_steps'],
+                args=args,
+            )
+
         # Save video
         if output_dir and len(result['image_list']) > 0:
             video_path = os.path.join(output_dir, f'eval_{args.mode}_ep{ep}.mp4')
@@ -416,6 +472,20 @@ if __name__ == '__main__':
     parser.add_argument('--control_rate', default=20, type=int)
     parser.add_argument('--reset_action', nargs='+', type=float, default=None,
                         help='Joint positions to reset the arm to before each episode (e.g. 7 values for single-arm)')
+
+    # Demo collection (for RM reference anchor). When --save_demo_dir is set,
+    # every rollout that the operator labels SUCCESS (typed "1") is dumped to
+    # <save_demo_dir>/demo_<YYYYMMDD_HHMMSS>/frame_<env_step:06d>.jpg + meta.txt.
+    # The user picks the best candidate later and copies/symlinks it to
+    # data/rm_demos/<TASK_TAG>/demo_seed0/ for actual RM training.
+    parser.add_argument('--save_demo_dir', default='', type=str,
+                        help='Parent dir for demo candidates. Empty = disabled. '
+                             'Suggested: data/rm_demos/<TASK_TAG>/candidates')
+    parser.add_argument('--save_demo_capture_stride', default=5, type=int,
+                        help='Env-steps between captured frames in image_list. '
+                             'The rollout loop captures at t%%5==0, so 5 is the '
+                             'right value here. Must match the --rm_capture_stride '
+                             'used at training time.')
 
     args = parser.parse_args()
     main(args)

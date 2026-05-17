@@ -122,8 +122,28 @@ class AirbotRewardModel:
         frame_stride: int = 10,
         demo_clip_stride: int = 5,
         threshold_offset: float = 0.5,
+        capture_stride: int = 1,
         device: str = 'cuda',
     ):
+        # All stride params are in env-step terms. capture_stride is how often
+        # (in env-steps) frames are actually saved to disk / captured into
+        # rm_frames during training. capture_stride=1 → dense; capture_stride=5
+        # → sparse (one frame per 5 env-steps, file_i corresponds to env_step
+        # i*capture_stride). Must evenly divide frame_stride, demo_clip_stride,
+        # and query_freq so file/capture-index arithmetic stays integer.
+        if frame_stride % capture_stride != 0:
+            raise ValueError(
+                f"frame_stride ({frame_stride}) must be divisible by "
+                f"capture_stride ({capture_stride})")
+        if demo_clip_stride % capture_stride != 0:
+            raise ValueError(
+                f"demo_clip_stride ({demo_clip_stride}) must be divisible by "
+                f"capture_stride ({capture_stride})")
+        if query_freq % capture_stride != 0:
+            raise ValueError(
+                f"query_freq ({query_freq}) must be divisible by "
+                f"capture_stride ({capture_stride})")
+
         _add_rm_repo_to_sys_path(rm_repo_path)
 
         from reward_model_baseline.MetaWorld.RewardModels.BinaryProgressRewardModel import (
@@ -137,27 +157,39 @@ class AirbotRewardModel:
         ReferenceAnchoredRewardModel.reset_global_instance()
 
         self.max_timesteps = max_timesteps
-        self.query_freq = query_freq
+        self.query_freq = query_freq                                  # env-step
+        self.query_freq_capture = query_freq // capture_stride        # capture-idx
         self.num_query_steps = num_query_steps
         self.num_frames = num_frames
-        self.frame_stride = frame_stride
-        self.demo_clip_stride = demo_clip_stride
+        self.frame_stride = frame_stride                              # env-step
+        self.frame_stride_file = frame_stride // capture_stride       # file-idx
+        self.demo_clip_stride = demo_clip_stride                      # env-step
+        self.demo_clip_stride_file = demo_clip_stride // capture_stride  # file-idx
         self.threshold_offset = threshold_offset
+        self.capture_stride = capture_stride
         self.device = device
 
-        self.clip_span = (num_frames - 1) * frame_stride + 1
+        self.clip_span = (num_frames - 1) * frame_stride + 1           # env-step
+        self.clip_span_file = (num_frames - 1) * self.frame_stride_file + 1
 
         # Demo clip middle-frame should cover env_steps roughly [half_span,
-        # max_timesteps]. With max_timesteps=200, clip_span=41, demo_stride=5
-        # this gives s_max=180 → 37 demo clips, matching the user spec.
+        # max_timesteps]. target_envstep = last_demo_start + clip_span. For
+        # max_timesteps=200, half_span=20, clip_span=41 → target=221 env_steps
+        # (env_step indices 0..220). Last 21 are padded copies of frame 199.
         half_span = (self.clip_span - 1) // 2
-        last_demo_start = max(0, max_timesteps - half_span)
-        target_demo_total = last_demo_start + self.clip_span
-        self.target_demo_total_frames = target_demo_total
+        last_demo_start_envstep = max(0, max_timesteps - half_span)
+        target_envstep = last_demo_start_envstep + self.clip_span
+        # Convert to file count for the storage layer: largest needed env_step
+        # is (target_envstep - 1); round up to a multiple of capture_stride.
+        last_needed_envstep = target_envstep - 1
+        last_needed_file = (last_needed_envstep + capture_stride - 1) // capture_stride
+        target_demo_total_files = last_needed_file + 1
+        self.target_demo_total_files = target_demo_total_files
+        self.target_envstep = target_envstep
 
         padded_demo_dir = _build_padded_demo_dir(
             demo_path=demo_path,
-            target_total_frames=target_demo_total,
+            target_total_frames=target_demo_total_files,
         )
         self.padded_demo_dir = padded_demo_dir
 
@@ -165,8 +197,8 @@ class AirbotRewardModel:
             demo_path=padded_demo_dir,
             device=device,
             num_frames=num_frames,
-            frame_stride=frame_stride,
-            clip_stride=demo_clip_stride,
+            frame_stride=self.frame_stride_file,
+            clip_stride=self.demo_clip_stride_file,
         )
         self._inner = self._rm.model
 
@@ -182,10 +214,12 @@ class AirbotRewardModel:
 
         print(f"[AirbotRewardModel] demo_path={demo_path}")
         print(f"[AirbotRewardModel] padded_demo_dir={padded_demo_dir} "
-              f"(target_total_frames={target_demo_total})")
+              f"(target_files={target_demo_total_files}, "
+              f"target_envstep={target_envstep}, capture_stride={capture_stride})")
         print(f"[AirbotRewardModel] num_demo_clips={self.num_demo_clips}, "
-              f"num_frames={num_frames}, frame_stride={frame_stride}, "
-              f"clip_span={self.clip_span}, demo_clip_stride={demo_clip_stride}")
+              f"num_frames={num_frames}, frame_stride={frame_stride} env-step "
+              f"(={self.frame_stride_file} file), clip_span={self.clip_span} env-step, "
+              f"demo_clip_stride={demo_clip_stride} env-step (={self.demo_clip_stride_file} file)")
         print(f"[AirbotRewardModel] per_clip_thresholds: "
               f"min={min(self.per_clip_thresholds):.4f}, "
               f"max={max(self.per_clip_thresholds):.4f}, "
@@ -203,14 +237,18 @@ class AirbotRewardModel:
         self,
         rollout_frames: Sequence[np.ndarray],
         num_query_steps: Optional[int] = None,
+        traj_id: Optional[int] = None,
     ) -> np.ndarray:
         """Compute per-query-step dense rewards for one rollout.
 
         Args:
-            rollout_frames: List of HxWx3 uint8 RGB frames captured at each env
-                step (length should be ~max_timesteps).
+            rollout_frames: List of HxWx3 uint8 RGB frames captured at every
+                `capture_stride` env-steps. So rollout_frames[i] corresponds to
+                env_step i*capture_stride. Length should be roughly
+                max_timesteps // capture_stride.
             num_query_steps: Number of query steps in the rollout (defaults to
                 self.num_query_steps).
+            traj_id: Optional rollout id, used only in the per-clip log header.
 
         Returns:
             np.ndarray of shape (num_query_steps,), dtype float32: 0.0 on RM
@@ -227,21 +265,36 @@ class AirbotRewardModel:
         if len(rollout_frames) == 0:
             return rewards
 
-        max_idx = len(rollout_frames) - 1
+        max_idx_capture = len(rollout_frames) - 1
 
-        max_reached_progress = 0.0
+        max_reached_progress = 0.0      # library float (for hit detection)
+        max_reached_idx = -1            # int demo-clip index (for display, Formula A)
         max_demo_progress = max(self.demo_progress) if self.demo_progress else 0.0
+        N = max(1, self.num_demo_clips)
+
+        # Header for the per-clip table.
+        tid = f"{traj_id}" if traj_id is not None else "?"
+        print(f"[RM] === rollout {tid}  ({num_query_steps} clips, "
+              f"query_freq={self.query_freq}, capture_stride={self.capture_stride}, "
+              f"num_demo_clips={self.num_demo_clips}) ===")
+        print(f"[RM]   k | rollout_frames                | max_sim | best_demo | "
+              f"demo_frames                   | prev_prog | curr_prog")
 
         with torch.inference_mode():
             for k in range(num_query_steps):
                 if max_demo_progress > 0.0 and max_reached_progress >= max_demo_progress:
+                    # Skip printing trailing clips per Q6.
                     break
 
-                start = k * self.query_freq
-                idxs = self._cap_indices(start, self.num_frames, self.frame_stride, max_idx)
+                # Build rollout clip indices in CAPTURE space (rollout_frames idx).
+                start_capture = k * self.query_freq_capture
+                idxs_capture = self._cap_indices(
+                    start_capture, self.num_frames, self.frame_stride_file, max_idx_capture
+                )
+                idxs_envstep = [i * self.capture_stride for i in idxs_capture]
 
                 clip_tensors = []
-                for idx in idxs:
+                for idx in idxs_capture:
                     f = rollout_frames[idx]
                     if isinstance(f, np.ndarray):
                         if f.dtype != np.uint8:
@@ -273,15 +326,50 @@ class AirbotRewardModel:
                 best_demo_idx = int(np.argmax(sims_np))
                 clip_threshold = self._inner.per_clip_thresholds[best_demo_idx]
 
+                # Progress percentages (Formula A: best_demo_idx / num_demo_clips).
+                prev_prog_pct = (max(0, max_reached_idx) / N) * 100.0
+                hit = False
                 if max_sim >= clip_threshold:
                     current_progress = self._inner.demo_progress[best_demo_idx]
                     if current_progress > max_reached_progress:
                         max_reached_progress = current_progress
+                        max_reached_idx = best_demo_idx
                         rewards[k] = 0.0
+                        hit = True
+                curr_prog_pct = (max(0, max_reached_idx) / N) * 100.0
+
+                # Demo clip frames in env-step terms (file_idx * capture_stride
+                # + i * frame_stride_envstep). Only meaningful when hit.
+                rollout_str = self._fmt_frames(idxs_envstep)
+                fmt_width = len(rollout_str)  # match miss padding to hit width
+                if hit:
+                    demo_start_file = self._inner.demo_clip_start_indices[best_demo_idx]
+                    demo_idxs_envstep = [
+                        demo_start_file * self.capture_stride + i * self.frame_stride
+                        for i in range(self.num_frames)
+                    ]
+                    demo_str = self._fmt_frames(demo_idxs_envstep)
+                    best_str = f"{best_demo_idx:>5d}"
+                    curr_str = f"{curr_prog_pct:>5.1f}%"
+                else:
+                    demo_str = f"{'miss':<{fmt_width}}"
+                    best_str = f"{'miss':>5}"
+                    curr_str = f"{'-':>5} "
+
+                print(f"[RM]  {k:>2d} | {rollout_str} |  {max_sim:.3f}  | "
+                      f"{best_str}     | {demo_str} |  {prev_prog_pct:>4.1f}%   | "
+                      f"  {curr_str}")
 
         self.last_max_reached_progress = max_reached_progress
         self.last_max_demo_progress = max_demo_progress
         return rewards
+
+    @staticmethod
+    def _fmt_frames(idxs):
+        """Format a list of frame indices as a fixed-width string [   0,   10, ...].
+        4-digit width so env_steps up to 9999 align nicely (max_timesteps=1000
+        → env_steps up to 1020 padded)."""
+        return "[" + ", ".join(f"{i:>4d}" for i in idxs) + "]"
 
     def close(self) -> None:
         """Release the RM singleton (frees GPU memory)."""

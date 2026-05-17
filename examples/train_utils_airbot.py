@@ -224,11 +224,13 @@ def collect_traj(variant, agent, robot, i, agent_dp=None, wandb_logger=None, tra
     action_list = []
     obs_list = []
     image_list = []
-    # Transient per-episode frame buffer for RM dense rewards (one frame per env
-    # step from the RM camera). Discarded after RM scoring — never enters the
-    # replay buffer. Only collected when --use_rm is set.
+    # Transient per-episode frame buffer for RM dense rewards. One frame per
+    # rm_capture_stride env-steps from the RM camera; rm_frames[i] corresponds
+    # to env_step i*rm_capture_stride. Discarded after RM scoring — never
+    # enters the replay buffer. Only collected when --use_rm is set.
     rm_frames = []
     rm_camera = getattr(variant, 'rm_camera', None) if rm is not None else None
+    rm_capture_stride = int(getattr(rm, 'capture_stride', 1)) if rm is not None else 1
     is_success = False
     t = -1
 
@@ -279,14 +281,27 @@ def collect_traj(variant, agent, robot, i, agent_dp=None, wandb_logger=None, tra
             obs_raw = robot.capture_observation()
             t_cam = time.time() - _t0
             curr_obs = extract_observation(robot, obs_raw, airbot_config)
-            # Save first camera image for video logging
+            # Save first camera image for video logging. RealSense default
+            # profile delivers BGR8 but downstream code treats as RGB; swap
+            # channels so saved videos look correct AND so RM consumes true
+            # RGB (matches DINOv3's training distribution). pi0's input
+            # pipeline still reads curr_obs['images'] unmodified, so SFT
+            # inference behavior is unchanged.
             first_cam = airbot_config['camera_names'][0]
             if first_cam in curr_obs['images']:
-                image_list.append(curr_obs['images'][first_cam])
-            # Per-env-step RM frame collection (transient — discarded after RM
-            # scoring at episode end; does not enter the replay buffer).
-            if rm is not None and rm_camera is not None and rm_camera in curr_obs['images']:
-                rm_frames.append(curr_obs['images'][rm_camera])
+                image_list.append(curr_obs['images'][first_cam][..., ::-1].copy())
+            # RM frame collection at env_steps that are multiples of
+            # rm_capture_stride (e.g. every 5 env-steps for sparse mode).
+            # rm_frames[len(rm_frames)] will correspond to env_step
+            # len(rm_frames)*rm_capture_stride at the moment of append.
+            # Transient — discarded after RM scoring; not in replay buffer.
+            # Same BGR->RGB swap as image_list above, kept consistent with the
+            # demo saver in eval_airbot_test.py so demo and rollout land in
+            # the same color space when scored by RM.
+            if (rm is not None and rm_camera is not None
+                    and rm_camera in curr_obs['images']
+                    and t % rm_capture_stride == 0):
+                rm_frames.append(curr_obs['images'][rm_camera][..., ::-1].copy())
 
             _t0 = time.time()
             request_data = obs_to_pi0_input(curr_obs, airbot_config, instruction)
@@ -444,7 +459,8 @@ def collect_traj(variant, agent, robot, i, agent_dp=None, wandb_logger=None, tra
         rm_hit_count = 0
         if rm is not None and query_steps > 0 and len(rm_frames) > 0:
             try:
-                rm_rewards = rm.compute_rewards(rm_frames, num_query_steps=query_steps)
+                rm_rewards = rm.compute_rewards(
+                    rm_frames, num_query_steps=query_steps, traj_id=traj_id)
                 rewards = rm_rewards.astype(np.float32)
                 # User-labeled success overrides reward[-1]: even if RM didn't
                 # hit on the final query step, the operator's success label
@@ -453,8 +469,8 @@ def collect_traj(variant, agent, robot, i, agent_dp=None, wandb_logger=None, tra
                     rewards[-1] = 0.0
                 rm_used = True
                 rm_hit_count = int((rewards == 0.0).sum())
-                print(f"[RM] rewards={rewards.tolist()} hits={rm_hit_count}/{query_steps} "
-                      f"is_success={int(is_success)}")
+                print(f"[RM] rewards={[round(float(r), 1) for r in rewards.tolist()]} "
+                      f"hits={rm_hit_count}/{query_steps} is_success={int(is_success)}")
             except Exception as e:
                 print(f"[RM] compute_rewards failed: {e}; falling back to sparse reward")
 
