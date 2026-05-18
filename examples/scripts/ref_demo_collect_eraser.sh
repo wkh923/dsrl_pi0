@@ -95,8 +95,8 @@ python3 examples/eval_airbot_test.py \
   --instruction "${INSTRUCTION}" \
   --reset_action ${RESET_ACTION} \
   --query_freq 25 \
-  --max_timesteps 1000 \
-  --control_rate 30 \
+  --max_timesteps 200 \
+  --control_rate 20 \
   --num_episodes 10 \
   --output_dir ./logs/eval_airbot_test_${MODE} \
   --save_demo_dir "${SAVE_DEMO_DIR}" \

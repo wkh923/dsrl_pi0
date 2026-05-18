@@ -251,8 +251,15 @@ class AirbotRewardModel:
             traj_id: Optional rollout id, used only in the per-clip log header.
 
         Returns:
-            np.ndarray of shape (num_query_steps,), dtype float32: 0.0 on RM
-            hit, -1.0 on miss.
+            np.ndarray of shape (num_query_steps,), dtype float32. Per-clip
+            reward semantics:
+              * hit   (matched + progress advanced):   -1 + 2*delta in [-1, +1]
+                where delta = min(1, delta_progress / (1/num_query_steps))
+                and delta_progress = (best_idx - prev_idx) / num_demo_clips.
+              * match (matched but no new progress):  -1
+              * miss  (max_sim < threshold):          -1
+            The is_success override (+2 on final step) is applied by the
+            caller (train_utils_airbot.collect_traj) AFTER this returns.
         """
         import torch
         from PIL import Image
@@ -267,23 +274,26 @@ class AirbotRewardModel:
 
         max_idx_capture = len(rollout_frames) - 1
 
-        max_reached_progress = 0.0      # library float (for hit detection)
-        max_reached_idx = -1            # int demo-clip index (for display, Formula A)
+        max_reached_progress = 0.0      # library float (for monotonicity check)
+        max_reached_idx = -1            # int demo-clip idx (for display + reward, Formula A)
         max_demo_progress = max(self.demo_progress) if self.demo_progress else 0.0
         N = max(1, self.num_demo_clips)
+        expected_delta = 1.0 / max(1, num_query_steps)   # e.g. 0.125 for 8 steps
 
         # Header for the per-clip table.
         tid = f"{traj_id}" if traj_id is not None else "?"
         print(f"[RM] === rollout {tid}  ({num_query_steps} clips, "
               f"query_freq={self.query_freq}, capture_stride={self.capture_stride}, "
-              f"num_demo_clips={self.num_demo_clips}) ===")
+              f"num_demo_clips={self.num_demo_clips}, "
+              f"expected_delta_per_step={expected_delta*100:.1f}%) ===")
         print(f"[RM]   k | rollout_frames                | max_sim | best_demo | "
-              f"demo_frames                   | prev_prog | curr_prog")
+              f"demo_frames                   | prev_prog | curr_prog | reward | status")
 
         with torch.inference_mode():
             for k in range(num_query_steps):
                 if max_demo_progress > 0.0 and max_reached_progress >= max_demo_progress:
-                    # Skip printing trailing clips per Q6.
+                    # All later clips can't advance progress → reward = -1 (already
+                    # the array's initial value). Skip GPU compute AND printing.
                     break
 
                 # Build rollout clip indices in CAPTURE space (rollout_frames idx).
@@ -326,23 +336,38 @@ class AirbotRewardModel:
                 best_demo_idx = int(np.argmax(sims_np))
                 clip_threshold = self._inner.per_clip_thresholds[best_demo_idx]
 
-                # Progress percentages (Formula A: best_demo_idx / num_demo_clips).
+                # Classify into hit / match / miss and compute reward.
+                #   hit   = matched (sim >= thr) AND advances progress
+                #   match = matched but no new progress (best_idx <= max_reached_idx)
+                #   miss  = sim < thr
+                matched = max_sim >= clip_threshold
+                advanced = matched and best_demo_idx > max_reached_idx
                 prev_prog_pct = (max(0, max_reached_idx) / N) * 100.0
-                hit = False
-                if max_sim >= clip_threshold:
-                    current_progress = self._inner.demo_progress[best_demo_idx]
-                    if current_progress > max_reached_progress:
-                        max_reached_progress = current_progress
-                        max_reached_idx = best_demo_idx
-                        rewards[k] = 0.0
-                        hit = True
+
+                if advanced:
+                    new_prog_pct = (best_demo_idx / N) * 100.0
+                    delta_progress = (new_prog_pct - prev_prog_pct) / 100.0   # back to [0,1]
+                    delta = min(1.0, delta_progress / expected_delta)
+                    rewards[k] = -1.0 + 2.0 * delta
+                    # Advance progress trackers
+                    max_reached_progress = self._inner.demo_progress[best_demo_idx]
+                    max_reached_idx = best_demo_idx
+                    status = "hit"
+                elif matched:
+                    rewards[k] = -1.0
+                    status = "match"
+                else:
+                    rewards[k] = -1.0
+                    status = "miss"
+
                 curr_prog_pct = (max(0, max_reached_idx) / N) * 100.0
 
-                # Demo clip frames in env-step terms (file_idx * capture_stride
-                # + i * frame_stride_envstep). Only meaningful when hit.
+                # Render row. "match" still shows best_demo + demo_frames (so user
+                # can see WHICH demo clip the rollout matched); only "miss" gets
+                # the "miss" placeholders.
                 rollout_str = self._fmt_frames(idxs_envstep)
-                fmt_width = len(rollout_str)  # match miss padding to hit width
-                if hit:
+                fmt_width = len(rollout_str)
+                if status != "miss":
                     demo_start_file = self._inner.demo_clip_start_indices[best_demo_idx]
                     demo_idxs_envstep = [
                         demo_start_file * self.capture_stride + i * self.frame_stride
@@ -350,15 +375,13 @@ class AirbotRewardModel:
                     ]
                     demo_str = self._fmt_frames(demo_idxs_envstep)
                     best_str = f"{best_demo_idx:>5d}"
-                    curr_str = f"{curr_prog_pct:>5.1f}%"
                 else:
                     demo_str = f"{'miss':<{fmt_width}}"
                     best_str = f"{'miss':>5}"
-                    curr_str = f"{'-':>5} "
 
                 print(f"[RM]  {k:>2d} | {rollout_str} |  {max_sim:.3f}  | "
                       f"{best_str}     | {demo_str} |  {prev_prog_pct:>4.1f}%   | "
-                      f"  {curr_str}")
+                      f"  {curr_prog_pct:>5.1f}%  | {rewards[k]:>+5.2f}  | {status:<5}")
 
         self.last_max_reached_progress = max_reached_progress
         self.last_max_demo_progress = max_demo_progress

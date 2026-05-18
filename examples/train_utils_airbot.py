@@ -456,21 +456,22 @@ def collect_traj(variant, agent, robot, i, agent_dp=None, wandb_logger=None, tra
             masks = np.ones(query_steps)
 
         rm_used = False
-        rm_hit_count = 0
         if rm is not None and query_steps > 0 and len(rm_frames) > 0:
             try:
                 rm_rewards = rm.compute_rewards(
                     rm_frames, num_query_steps=query_steps, traj_id=traj_id)
                 rewards = rm_rewards.astype(np.float32)
-                # User-labeled success overrides reward[-1]: even if RM didn't
-                # hit on the final query step, the operator's success label
-                # forces it to 0. On failure, keep the RM result.
+                # User-label override on the FINAL query step only:
+                #   pressed "1" (success) → rewards[-1] = +2.0   (replaces RM value)
+                #   pressed "0" (failure) → keep RM-computed value (could be any
+                #                           value in [-1, +1] depending on progress)
+                # Non-final steps are never overridden.
                 if is_success:
-                    rewards[-1] = 0.0
+                    rewards[-1] = 2.0
                 rm_used = True
-                rm_hit_count = int((rewards == 0.0).sum())
-                print(f"[RM] rewards={[round(float(r), 1) for r in rewards.tolist()]} "
-                      f"hits={rm_hit_count}/{query_steps} is_success={int(is_success)}")
+                rewards_pretty = [round(float(r), 2) for r in rewards.tolist()]
+                print(f"[RM] rewards={rewards_pretty} sum={float(rewards.sum()):.2f} "
+                      f"final={float(rewards[-1]):+.2f} is_success={int(is_success)}")
             except Exception as e:
                 print(f"[RM] compute_rewards failed: {e}; falling back to sparse reward")
 
@@ -479,9 +480,16 @@ def collect_traj(variant, agent, robot, i, agent_dp=None, wandb_logger=None, tra
             wandb_logger.log({'total_num_traj': traj_id}, step=i)
             wandb_logger.log({'rollout/user_success': float(is_success)}, step=i)
             if rm_used:
+                # Number of clips that advanced progress (= "hit" status), counted
+                # via rewards > -1. The final clip can carry the +2 success bonus
+                # which also satisfies rewards > -1, so this is "advance OR final-
+                # step success" — a useful proxy for RM hit rate per episode.
+                hit_count = int((rewards > -1.0 + 1e-6).sum())
                 wandb_logger.log({
-                    'rollout/rm_hit_count': rm_hit_count,
+                    'rollout/rm_hit_count': hit_count,
                     'rollout/rm_mean_reward': float(rewards.mean()),
+                    'rollout/rm_sum_reward': float(rewards.sum()),
+                    'rollout/rm_final_reward': float(rewards[-1]),
                     'rollout/rm_max_reached_progress': float(
                         getattr(rm, 'last_max_reached_progress', 0.0)),
                 }, step=i)
