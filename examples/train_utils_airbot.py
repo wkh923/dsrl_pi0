@@ -13,7 +13,6 @@ import select
 import tty
 import termios
 from openpi_client import image_tools
-from moviepy.editor import ImageSequenceClip
 
 
 def obs_to_pi0_input(curr_obs, airbot_config, instruction):
@@ -179,6 +178,18 @@ def trajwise_alternating_training_loop(variant, agent, robot, online_replay_buff
                 # would lose ~21 rollouts of SAC training on crash). One extra
                 # ckpt write per rollout costs ~5 MB / ~1 second.
                 agent.save_checkpoint(variant.outputdir, i, variant.checkpoint_interval)
+
+            # === Milestone SAC checkpoint every 5 rollouts ===
+            # Saved under outputdir/milestones/ with keep_every_n_steps=1 so
+            # EVERY milestone survives flax pruning (the rolling resume ckpt
+            # above prunes to multiples of checkpoint_interval). Dirs are named
+            # by rollout count — milestones/checkpoint5, checkpoint10, ... —
+            # giving a permanent, predictable policy-snapshot history for eval.
+            # Does not affect resume: latest_checkpoint() reads outputdir/, not
+            # outputdir/milestones/.
+            if total_num_traj % 5 == 0:
+                milestones_dir = os.path.join(variant.outputdir, 'milestones')
+                agent.save_checkpoint(milestones_dir, total_num_traj, keep_every_n_steps=1)
 
 
 def add_online_data_to_buffer(variant, traj, online_replay_buffer):
@@ -427,12 +438,14 @@ def collect_traj(variant, agent, robot, i, agent_dp=None, wandb_logger=None, tra
                     break
             time.sleep(0.01)
 
-        # Add last observation
+        # Add last observation. Same BGR->RGB swap as the in-loop append
+        # (line ~304) so the final video frame matches the rest — RealSense
+        # default profile delivers BGR8.
         obs_raw = robot.capture_observation()
         curr_obs = extract_observation(robot, obs_raw, airbot_config)
         first_cam = airbot_config['camera_names'][0]
         if first_cam in curr_obs['images']:
-            image_list.append(curr_obs['images'][first_cam])
+            image_list.append(curr_obs['images'][first_cam][..., ::-1].copy())
         request_data = obs_to_pi0_input(curr_obs, airbot_config, instruction)
         img_all = process_images_for_sac(variant, curr_obs, airbot_config)
         img_rep_pi0, _ = agent_dp.get_prefix_rep(request_data)
@@ -462,12 +475,14 @@ def collect_traj(variant, agent, robot, i, agent_dp=None, wandb_logger=None, tra
                     rm_frames, num_query_steps=query_steps, traj_id=traj_id)
                 rewards = rm_rewards.astype(np.float32)
                 # User-label override on the FINAL query step only:
-                #   pressed "1" (success) → rewards[-1] = +2.0   (replaces RM value)
-                #   pressed "0" (failure) → keep RM-computed value (could be any
-                #                           value in [-1, +1] depending on progress)
-                # Non-final steps are never overridden.
+                #   pressed "1" (success) → rewards[-1] += 1.0  (completion bonus
+                #       ON TOP of the halved RM step reward → final ∈ [0.5, 1.5])
+                #   pressed "0" (failure) → keep RM-computed value (the halved
+                #       step reward, ∈ [-0.5, +0.5])
+                # Non-final steps are never overridden. Per-clip RM rewards are
+                # in the halved range [-0.5, +0.5]; episode sum ∈ [-4.0, +5.0].
                 if is_success:
-                    rewards[-1] = 2.0
+                    rewards[-1] = float(rewards[-1]) + 1.0
                 rm_used = True
                 rewards_pretty = [round(float(r), 2) for r in rewards.tolist()]
                 print(f"[RM] rewards={rewards_pretty} sum={float(rewards.sum()):.2f} "
@@ -480,11 +495,12 @@ def collect_traj(variant, agent, robot, i, agent_dp=None, wandb_logger=None, tra
             wandb_logger.log({'total_num_traj': traj_id}, step=i)
             wandb_logger.log({'rollout/user_success': float(is_success)}, step=i)
             if rm_used:
-                # Number of clips that advanced progress (= "hit" status), counted
-                # via rewards > -1. The final clip can carry the +2 success bonus
-                # which also satisfies rewards > -1, so this is "advance OR final-
-                # step success" — a useful proxy for RM hit rate per episode.
-                hit_count = int((rewards > -1.0 + 1e-6).sum())
+                # Number of clips that advanced progress (= "hit" status):
+                # halved per-clip rewards are -0.5 for match/miss and > -0.5 for
+                # hits, so count rewards strictly above -0.5. The final clip's
+                # +1.0 success bonus also clears this, so it's "advance OR
+                # final-step success" — a useful proxy for RM hit rate.
+                hit_count = int((rewards > -0.5 + 1e-6).sum())
                 wandb_logger.log({
                     'rollout/rm_hit_count': hit_count,
                     'rollout/rm_mean_reward': float(rewards.mean()),
@@ -494,13 +510,21 @@ def collect_traj(variant, agent, robot, i, agent_dp=None, wandb_logger=None, tra
                         getattr(rm, 'last_max_reached_progress', 0.0)),
                 }, step=i)
 
-        # Save rollout video
+        # Save rollout frames — one every 5 env-steps, same format as the
+        # reference demo (frame_000000.jpg, frame_000005.jpg, ...). image_list
+        # is captured every env-step so image_list[i] is env_step i; saving
+        # image_list[::5] yields env_steps 0, 5, 10, ... A good rollout's
+        # folder can be used directly as an RM reference demo.
         if len(image_list) > 0:
-            video_path = os.path.join(variant.outputdir, f'video_{traj_id}.mp4')
-            video = np.stack(image_list)
-            ImageSequenceClip(list(video), fps=airbot_config.get('control_rate', 20)).write_videofile(
-                video_path, codec="libx264"
-            )
+            from PIL import Image
+            frames_dir = os.path.join(variant.outputdir, f'rollout_{traj_id}')
+            os.makedirs(frames_dir, exist_ok=True)
+            for envstep in range(0, len(image_list), 5):
+                arr = np.asarray(image_list[envstep])
+                if arr.dtype != np.uint8:
+                    arr = np.clip(arr, 0, 255).astype(np.uint8)
+                Image.fromarray(arr, mode='RGB').save(
+                    os.path.join(frames_dir, f'frame_{envstep:06d}.jpg'), quality=95)
 
         print("Episode Done! Press Enter after resetting the environment...")
         # Wait for user confirmation before continuing

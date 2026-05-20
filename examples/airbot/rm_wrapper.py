@@ -252,14 +252,16 @@ class AirbotRewardModel:
 
         Returns:
             np.ndarray of shape (num_query_steps,), dtype float32. Per-clip
-            reward semantics:
-              * hit   (matched + progress advanced):   -1 + 2*delta in [-1, +1]
+            reward semantics (halved range to keep SAC critic Q-values small):
+              * hit   (matched + progress advanced):  -0.5 + delta in [-0.5, +0.5]
                 where delta = min(1, delta_progress / (1/num_query_steps))
                 and delta_progress = (best_idx - prev_idx) / num_demo_clips.
-              * match (matched but no new progress):  -1
-              * miss  (max_sim < threshold):          -1
-            The is_success override (+2 on final step) is applied by the
-            caller (train_utils_airbot.collect_traj) AFTER this returns.
+              * match (matched but no new progress): -0.5
+              * miss  (max_sim < threshold):         -0.5
+            The is_success override is applied by the caller
+            (train_utils_airbot.collect_traj) AFTER this returns: on success
+            the caller adds +1.0 to the RM-computed final-step reward (→ in
+            [0.5, 1.5]); on failure the final step keeps its raw RM value.
         """
         import torch
         from PIL import Image
@@ -267,7 +269,7 @@ class AirbotRewardModel:
         if num_query_steps is None:
             num_query_steps = self.num_query_steps
 
-        rewards = -np.ones(num_query_steps, dtype=np.float32)
+        rewards = -0.5 * np.ones(num_query_steps, dtype=np.float32)
 
         if len(rollout_frames) == 0:
             return rewards
@@ -292,8 +294,8 @@ class AirbotRewardModel:
         with torch.inference_mode():
             for k in range(num_query_steps):
                 if max_demo_progress > 0.0 and max_reached_progress >= max_demo_progress:
-                    # All later clips can't advance progress → reward = -1 (already
-                    # the array's initial value). Skip GPU compute AND printing.
+                    # All later clips can't advance progress → reward = -0.5
+                    # (already the array's initial value). Skip GPU compute AND printing.
                     break
 
                 # Build rollout clip indices in CAPTURE space (rollout_frames idx).
@@ -348,16 +350,17 @@ class AirbotRewardModel:
                     new_prog_pct = (best_demo_idx / N) * 100.0
                     delta_progress = (new_prog_pct - prev_prog_pct) / 100.0   # back to [0,1]
                     delta = min(1.0, delta_progress / expected_delta)
-                    rewards[k] = -1.0 + 2.0 * delta
+                    # Halved range: (-1 + 2*delta)/2 = -0.5 + delta ∈ [-0.5, +0.5].
+                    rewards[k] = -0.5 + delta
                     # Advance progress trackers
                     max_reached_progress = self._inner.demo_progress[best_demo_idx]
                     max_reached_idx = best_demo_idx
                     status = "hit"
                 elif matched:
-                    rewards[k] = -1.0
+                    rewards[k] = -0.5
                     status = "match"
                 else:
-                    rewards[k] = -1.0
+                    rewards[k] = -0.5
                     status = "miss"
 
                 curr_prog_pct = (max(0, max_reached_idx) / N) * 100.0

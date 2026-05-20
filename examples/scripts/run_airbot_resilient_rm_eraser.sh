@@ -60,7 +60,10 @@ NUM_RANDOM_ROLLOUTS=10
 # ============================================================
 RM_DEMO_PATH="/home/jpy/dsrl_pi0/data/rm_demos/${TASK_TAG}/demo_seed0"
 RM_CAMERA="base_0_rgb"
-RM_THRESHOLD_OFFSET=0.5   # per_clip_threshold = max_self_sim - this; smaller → easier hits
+RM_THRESHOLD_OFFSET=0.3   # per_clip_threshold = max_self_sim - this; SMALLER offset
+                          # → HIGHER threshold → STRICTER match (rollout clip needs
+                          # higher similarity to count as match/hit). 0.3: e.g. a
+                          # demo clip with max_self_sim 0.8 needs rollout sim ≥ 0.5.
 RM_REPO_PATH="/home/jpy/RM/Airbot-VLA-RL/Reward-Model-MVP"
 
 # ============================================================
