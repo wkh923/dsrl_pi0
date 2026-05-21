@@ -111,6 +111,12 @@ class AirbotRewardModel:
         # rewards.shape == (8,); 0.0 = RM hit, -1.0 = miss.
     """
 
+    # When False, the caller (train_utils_airbot.collect_traj) applies the
+    # is_success override (+1.0 on the final step). Subclasses that bake the
+    # success logic into compute_rewards themselves set this True so the
+    # caller skips its override (see EraserRewardModel).
+    handles_success_internally = False
+
     def __init__(
         self,
         demo_path: str,
@@ -233,11 +239,66 @@ class AirbotRewardModel:
         index to `max_idx` (the last valid frame). Mirrors user spec for k=7."""
         return [min(start + i * frame_stride, max_idx) for i in range(num_frames)]
 
+    def _score_query_clip(self, rollout_frames, k, max_idx_capture):
+        """Encode rollout query-step k's clip and compare against all demo clips.
+
+        Returns (max_sim, best_demo_idx, clip_threshold, idxs_envstep) where
+        idxs_envstep is the 5-frame clip in env-step terms. Shared by
+        compute_rewards variants (e.g. EraserRewardModel) so the DINOv3 +
+        cross-attn scoring lives in one place.
+        """
+        import torch
+        from PIL import Image
+
+        start_capture = k * self.query_freq_capture
+        idxs_capture = self._cap_indices(
+            start_capture, self.num_frames, self.frame_stride_file, max_idx_capture)
+        idxs_envstep = [i * self.capture_stride for i in idxs_capture]
+
+        clip_tensors = []
+        for idx in idxs_capture:
+            f = rollout_frames[idx]
+            if isinstance(f, np.ndarray):
+                if f.dtype != np.uint8:
+                    if f.max() <= 1.5:
+                        f = (f * 255).clip(0, 255).astype(np.uint8)
+                    else:
+                        f = np.clip(f, 0, 255).astype(np.uint8)
+                pil = Image.fromarray(f, mode='RGB')
+            elif isinstance(f, Image.Image):
+                pil = f.convert('RGB')
+            else:
+                raise TypeError(
+                    f"rollout_frames must contain np.ndarray or PIL.Image, got {type(f)}")
+            clip_tensors.append(self._inner._prepare_frame(pil))
+
+        clip = torch.stack(clip_tensors)
+        rollout_emb = self._inner._encode_clip(clip)
+
+        demo_batch = self._inner.demo_embs
+        rollout_batch = rollout_emb.unsqueeze(0).expand(demo_batch.size(0), -1, -1)
+        rollout_batch = rollout_batch.to(self._inner.model.dtype)
+        demo_batch_dtype = demo_batch.to(self._inner.model.dtype)
+        emb_a_vs_b = self._inner.model.cross_attn(rollout_batch, demo_batch_dtype)
+        sims = self._inner.model.comparison_head(emb_a_vs_b)
+        sims_np = sims.detach().float().cpu().numpy()
+
+        max_sim = float(np.max(sims_np))
+        best_demo_idx = int(np.argmax(sims_np))
+        clip_threshold = self._inner.per_clip_thresholds[best_demo_idx]
+        return max_sim, best_demo_idx, clip_threshold, idxs_envstep
+
+    def demo_clip_first_envstep(self, best_demo_idx):
+        """Env-step of the matched demo clip's FIRST frame — what the per-clip
+        table displays as `demo_frames[0]`."""
+        return self._inner.demo_clip_start_indices[best_demo_idx] * self.capture_stride
+
     def compute_rewards(
         self,
         rollout_frames: Sequence[np.ndarray],
         num_query_steps: Optional[int] = None,
         traj_id: Optional[int] = None,
+        is_success: bool = False,
     ) -> np.ndarray:
         """Compute per-query-step dense rewards for one rollout.
 
@@ -249,6 +310,9 @@ class AirbotRewardModel:
             num_query_steps: Number of query steps in the rollout (defaults to
                 self.num_query_steps).
             traj_id: Optional rollout id, used only in the per-clip log header.
+            is_success: Operator success label. Unused by this base
+                (progress) variant — the caller applies the +1.0 override.
+                Subclasses (EraserRewardModel) consume it directly.
 
         Returns:
             np.ndarray of shape (num_query_steps,), dtype float32. Per-clip

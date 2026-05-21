@@ -472,16 +472,17 @@ def collect_traj(variant, agent, robot, i, agent_dp=None, wandb_logger=None, tra
         if rm is not None and query_steps > 0 and len(rm_frames) > 0:
             try:
                 rm_rewards = rm.compute_rewards(
-                    rm_frames, num_query_steps=query_steps, traj_id=traj_id)
+                    rm_frames, num_query_steps=query_steps, traj_id=traj_id,
+                    is_success=is_success)
                 rewards = rm_rewards.astype(np.float32)
-                # User-label override on the FINAL query step only:
+                # FINAL-step success override. Skipped for variants that bake
+                # the success logic into compute_rewards themselves
+                # (handles_success_internally=True, e.g. EraserRewardModel).
+                # For the default progress variant:
                 #   pressed "1" (success) → rewards[-1] += 1.0  (completion bonus
                 #       ON TOP of the halved RM step reward → final ∈ [0.5, 1.5])
-                #   pressed "0" (failure) → keep RM-computed value (the halved
-                #       step reward, ∈ [-0.5, +0.5])
-                # Non-final steps are never overridden. Per-clip RM rewards are
-                # in the halved range [-0.5, +0.5]; episode sum ∈ [-4.0, +5.0].
-                if is_success:
+                #   pressed "0" (failure) → keep RM-computed value (∈ [-0.5, +0.5])
+                if is_success and not getattr(rm, 'handles_success_internally', False):
                     rewards[-1] = float(rewards[-1]) + 1.0
                 rm_used = True
                 rewards_pretty = [round(float(r), 2) for r in rewards.tolist()]

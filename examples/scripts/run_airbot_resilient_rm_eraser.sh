@@ -112,7 +112,8 @@ while true; do
     --rm_camera "${RM_CAMERA}" \
     --rm_threshold_offset ${RM_THRESHOLD_OFFSET} \
     --rm_repo_path "${RM_REPO_PATH}" \
-    --rm_capture_stride 5
+    --rm_capture_stride 5 \
+    --rm_variant eraser
     code=$?
 
     if [ $code -eq 0 ]; then

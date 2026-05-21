@@ -235,8 +235,13 @@ def main(variant):
         if variant.rm_camera not in variant.camera_names:
             raise ValueError(
                 f"--rm_camera={variant.rm_camera!r} not in --camera_names={variant.camera_names}")
-        from examples.airbot.rm_wrapper import AirbotRewardModel
-        rm = AirbotRewardModel(
+        rm_variant = getattr(variant, 'rm_variant', 'progress')
+        if rm_variant == 'eraser':
+            from examples.airbot.rm_wrapper_eraser import EraserRewardModel as RMClass
+        else:
+            from examples.airbot.rm_wrapper import AirbotRewardModel as RMClass
+        print(f"[RM] using reward variant: {rm_variant} ({RMClass.__name__})")
+        rm = RMClass(
             demo_path=variant.rm_demo_path,
             rm_repo_path=variant.rm_repo_path,
             max_timesteps=variant.max_timesteps,

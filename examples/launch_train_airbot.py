@@ -98,6 +98,14 @@ if __name__ == '__main__':
                              'env-steps, matching the saver in eval_airbot_test.py). '
                              'Must evenly divide frame_stride (10), '
                              'demo_clip_stride (5), and query_freq.')
+    parser.add_argument('--rm_variant', default='progress',
+                        choices=['progress', 'eraser'],
+                        help="Which RM reward scheme to use. 'progress' = the "
+                             'general continuous progress-delta reward '
+                             '(rm_wrapper.AirbotRewardModel). \'eraser\' = the '
+                             'milestone-based reward hard-coded for the '
+                             'pick_eraser_out_of_box task '
+                             '(rm_wrapper_eraser.EraserRewardModel).')
 
     # SAC hyperparameters tuned for real robot (following train_real.py / run_real.sh)
     train_args_dict = dict(
