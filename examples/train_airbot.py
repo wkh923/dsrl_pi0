@@ -238,6 +238,8 @@ def main(variant):
         rm_variant = getattr(variant, 'rm_variant', 'progress')
         if rm_variant == 'eraser':
             from examples.airbot.rm_wrapper_eraser import EraserRewardModel as RMClass
+        elif rm_variant == 'clothes':
+            from examples.airbot.rm_wrapper_clothes import ClothesRewardModel as RMClass
         else:
             from examples.airbot.rm_wrapper import AirbotRewardModel as RMClass
         print(f"[RM] using reward variant: {rm_variant} ({RMClass.__name__})")

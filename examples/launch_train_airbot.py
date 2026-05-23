@@ -99,13 +99,15 @@ if __name__ == '__main__':
                              'Must evenly divide frame_stride (10), '
                              'demo_clip_stride (5), and query_freq.')
     parser.add_argument('--rm_variant', default='progress',
-                        choices=['progress', 'eraser'],
+                        choices=['progress', 'eraser', 'clothes'],
                         help="Which RM reward scheme to use. 'progress' = the "
                              'general continuous progress-delta reward '
                              '(rm_wrapper.AirbotRewardModel). \'eraser\' = the '
                              'milestone-based reward hard-coded for the '
                              'pick_eraser_out_of_box task '
-                             '(rm_wrapper_eraser.EraserRewardModel).')
+                             '(rm_wrapper_eraser.EraserRewardModel). \'clothes\' '
+                             '= progress reward + a 90%-regime milestone reward '
+                             'for fold_clothes (rm_wrapper_clothes.ClothesRewardModel).')
 
     # SAC hyperparameters tuned for real robot (following train_real.py / run_real.sh)
     train_args_dict = dict(

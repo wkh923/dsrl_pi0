@@ -47,7 +47,7 @@ mkdir -p "$RESUME_DIR"
 # ============================================================
 
 PI0_CONFIG_PATH="/home/jpy/RM/Airbot-VLA-RL/VLA/airbot-pi0/openpi/data/fold_clothes/config.py"
-PI0_CHECKPOINT_DIR="/home/jpy/RM/Airbot-VLA-RL/VLA/airbot-pi0/checkpoints/fold_clothes/fold_clothes/49999"
+PI0_CHECKPOINT_DIR="/home/jpy/RM/Airbot-VLA-RL/VLA/airbot-pi0/checkpoints/fold_clothes/fold_clothes/74999"
 
 ROBOT_PORTS="50051 50053"  # dual-arm
 CAMERA_INDEX="243222074218 243522071794 243222071389"
@@ -100,7 +100,7 @@ while true; do
     --robot_ports ${ROBOT_PORTS} \
     --camera_names ${CAMERA_NAMES} \
     --camera_index ${CAMERA_INDEX} \
-    --max_timesteps 200 \
+    --max_timesteps 1000 \
     --control_rate 20 \
     --reset_action ${RESET_ACTION} \
     --instruction "${INSTRUCTION}" \
@@ -110,7 +110,8 @@ while true; do
     --rm_camera "${RM_CAMERA}" \
     --rm_threshold_offset ${RM_THRESHOLD_OFFSET} \
     --rm_repo_path "${RM_REPO_PATH}" \
-    --rm_capture_stride 5
+    --rm_capture_stride 5 \
+    --rm_variant clothes
     code=$?
 
     if [ $code -eq 0 ]; then
