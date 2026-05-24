@@ -40,7 +40,7 @@ TASK_TAG=open_drawer
 # PI0_CHECKPOINT_DIR="/home/jpy/RM/Airbot-VLA-RL/VLA/airbot-pi0/checkpoints/pick_eraser_out_of_box/pick_eraser/30000"
 
 PI0_CONFIG_PATH="/home/jpy/RM/Airbot-VLA-RL/VLA/airbot-pi0/openpi/data/pull_drawer/config.py"
-PI0_CHECKPOINT_DIR="/home/jpy/RM/Airbot-VLA-RL/VLA/airbot-pi0/checkpoints/open_drawer/please open the drawer/30000"
+PI0_CHECKPOINT_DIR="/home/jpy/RM/Airbot-VLA-RL/VLA/airbot-pi0/checkpoints/open_drawer/please open the drawer/20000"
 
 
 # Robot ports (single-arm: one port, dual-arm: two ports)
@@ -93,7 +93,7 @@ python3 examples/eval_airbot_test.py \
   --instruction "${INSTRUCTION}" \
   --reset_action ${RESET_ACTION} \
   --query_freq 25 \
-  --max_timesteps 200 \
+  --max_timesteps 175 \
   --control_rate 20 \
   --num_episodes 10 \
   --output_dir ./logs/eval_airbot_test_${MODE} \
