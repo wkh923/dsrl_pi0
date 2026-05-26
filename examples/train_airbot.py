@@ -240,6 +240,8 @@ def main(variant):
             from examples.airbot.rm_wrapper_eraser import EraserRewardModel as RMClass
         elif rm_variant == 'clothes':
             from examples.airbot.rm_wrapper_clothes import ClothesRewardModel as RMClass
+        elif rm_variant == 'drawer':
+            from examples.airbot.rm_wrapper_drawer import DrawerRewardModel as RMClass
         else:
             from examples.airbot.rm_wrapper import AirbotRewardModel as RMClass
         print(f"[RM] using reward variant: {rm_variant} ({RMClass.__name__})")

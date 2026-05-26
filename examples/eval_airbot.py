@@ -167,17 +167,14 @@ def run_episode(args, robot, agent_dp, airbot_config, agent=None, rng=None, epis
 
             action_t = action[t % query_frequency]
 
-            if mode == 'dsrl':
-                action_t = np.clip(action_t, -1, 1)
-                state_dim = airbot_config['state_dim']
-                num_arms = state_dim // 7
-                for arm_idx in range(num_arms):
-                    gripper_idx = (arm_idx + 1) * 7 - 1
-                    if gripper_idx < len(action_t):
-                        action_t[gripper_idx] = 1.0 if action_t[gripper_idx] > 0.5 else 0.0
-                robot.send_action(action_t[:state_dim])
-            else:
-                robot.send_action(action_t)
+            # Send action to robot. pi0 outputs absolute joint angles (radians)
+            # via AbsoluteActions output transform — clipping to [-1,1] would
+            # mangle them (e.g. j4=-1.615 rad would become -1.0). Match
+            # train_utils_airbot.collect_traj: send raw, slice to state_dim.
+            # Same path for pi0 and dsrl modes (the only difference upstream is
+            # whether `action` came from pi0 alone or pi0 + SAC-predicted noise).
+            state_dim = airbot_config['state_dim']
+            robot.send_action(action_t[:state_dim])
 
             now = time.time()
             dt = now - last_step_time

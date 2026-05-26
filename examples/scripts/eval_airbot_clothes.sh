@@ -55,7 +55,19 @@ if [ "$MODE" = "dsrl" ]; then
         echo "Usage: bash examples/scripts/eval_airbot.sh dsrl /path/to/sac_checkpoint"
         exit 1
     fi
-    DSRL_ARGS="--sac_checkpoint_dir ${SAC_CHECKPOINT_DIR}"
+    # Walk up from the checkpoint dir to find the nearest variant.json (the
+    # training output dir). Handles both top-level checkpoints (parent has
+    # variant.json) and milestones/checkpointN (parent's parent has it).
+    VARIANT_DIR="$(dirname "${SAC_CHECKPOINT_DIR}")"
+    while [ "${VARIANT_DIR}" != "/" ] && [ ! -f "${VARIANT_DIR}/variant.json" ]; do
+        VARIANT_DIR="$(dirname "${VARIANT_DIR}")"
+    done
+    if [ ! -f "${VARIANT_DIR}/variant.json" ]; then
+        echo "Error: could not locate variant.json above ${SAC_CHECKPOINT_DIR}"
+        exit 1
+    fi
+    echo "Located training variant: ${VARIANT_DIR}/variant.json"
+    DSRL_ARGS="--sac_checkpoint_dir ${SAC_CHECKPOINT_DIR} --training_variant_path ${VARIANT_DIR}/variant.json"
 fi
 
 echo "=== Evaluating ${MODE} policy ==="
@@ -72,7 +84,7 @@ python3 examples/eval_airbot.py \
   --reset_action ${RESET_ACTION} \
   --query_freq 25 \
   --max_timesteps 1000 \
-  --control_rate 20 \
-  --num_episodes 10 \
+  --control_rate 30 \
+  --num_episodes 30 \
   --output_dir ./logs/eval_airbot_${MODE} \
   ${DSRL_ARGS}

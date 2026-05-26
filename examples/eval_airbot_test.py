@@ -192,7 +192,7 @@ def run_episode(args, robot, agent_dp, airbot_config, agent=None, rng=None, epis
                     # we've isolated the bug to the repeated-noise OOD input —
                     # nothing else changes between this and `eval_airbot.py pi0`.
                     rng, key = jax.random.split(rng)
-                    seed = jax.random.normal(key, (1, 1, 32))                 # one (1, 32) Gaussian
+                    seed = jax.random.normal(key, (1, 1, 32)) * args.noise_scale  # one (1, 32) Gaussian, scaled by --noise_scale
                     repeat = jax.numpy.repeat(seed[:, -1:, :], action_horizon - 1, axis=1)
                     noise = jax.numpy.concatenate([seed, repeat], axis=1)     # (1, 50, 32) all identical
                     action = agent_dp.infer(request_data, noise=np.asarray(noise))["actions"]
@@ -444,6 +444,9 @@ if __name__ == '__main__':
     parser.add_argument('--num_episodes', default=10, type=int, help='Number of evaluation episodes')
     parser.add_argument('--output_dir', default='./logs/eval_airbot', help='Directory to save videos')
     parser.add_argument('--seed', default=42, type=int)
+    parser.add_argument('--noise_scale', default=1.0, type=float,
+                        help='pi0 mode only: scale factor applied to the repeated-noise '
+                             'seed N(0, 1). 1.0 = standard Gaussian (default).')
 
     # Pi0 policy
     parser.add_argument('--pi0_mode', default='local', choices=['local', 'remote'])
