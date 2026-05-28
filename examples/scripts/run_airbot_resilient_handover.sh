@@ -36,7 +36,7 @@ mkdir -p "$RESUME_DIR"
 # ============================================================
 
 PI0_CONFIG_PATH="/home/jpy/RM/Airbot-VLA-RL/VLA/airbot-pi0/openpi/data/handover/config.py"
-PI0_CHECKPOINT_DIR="/home/jpy/RM/Airbot-VLA-RL/VLA/airbot-pi0/checkpoints/handover/39999"
+PI0_CHECKPOINT_DIR="/home/jpy/RM/Airbot-VLA-RL/VLA/airbot-pi0/checkpoints/handover/74999"
 
 ROBOT_PORTS="50051 50053"  # dual-arm
 CAMERA_INDEX="243222074218 243522071794 243222071389"
@@ -83,6 +83,7 @@ while true; do
     --max_timesteps 300 \
     --control_rate 20 \
     --reset_action ${RESET_ACTION} \
+    --reset_release_grippers \
     --instruction "${INSTRUCTION}" \
     --resume_dir "${RESUME_DIR}"
     code=$?

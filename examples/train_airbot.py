@@ -242,6 +242,8 @@ def main(variant):
             from examples.airbot.rm_wrapper_clothes import ClothesRewardModel as RMClass
         elif rm_variant == 'drawer':
             from examples.airbot.rm_wrapper_drawer import DrawerRewardModel as RMClass
+        elif rm_variant == 'handover':
+            from examples.airbot.rm_wrapper_handover import HandoverRewardModel as RMClass
         else:
             from examples.airbot.rm_wrapper import AirbotRewardModel as RMClass
         print(f"[RM] using reward variant: {rm_variant} ({RMClass.__name__})")

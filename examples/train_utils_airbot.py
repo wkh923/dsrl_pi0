@@ -251,8 +251,13 @@ def collect_traj(variant, agent, robot, i, agent_dp=None, wandb_logger=None, tra
     reset_action = getattr(variant, 'reset_action', None) or []
     if reset_action:
         wait_time = getattr(variant, 'reset_wait_time', 3.0)
-        print(f"Auto-resetting arms to home pose (wait {wait_time}s)...")
-        robot.reset_to_pose(reset_action, wait_time=wait_time)
+        release_grippers = getattr(variant, 'reset_release_grippers', False)
+        gripper_open = getattr(variant, 'reset_gripper_open_value', 0.072)
+        print(f"Auto-resetting arms to home pose "
+              f"(release_grippers_first={release_grippers}, wait {wait_time}s)...")
+        robot.reset_to_pose(reset_action, wait_time=wait_time,
+                            release_grippers_first=release_grippers,
+                            gripper_open_value=gripper_open)
         print("Reset complete.")
 
     old_settings = termios.tcgetattr(sys.stdin)

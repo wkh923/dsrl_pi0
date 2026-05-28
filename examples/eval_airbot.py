@@ -332,8 +332,13 @@ def main(args):
     successes = []
     for ep in range(args.num_episodes):
         if args.reset_action:
-            print(f"Resetting arm to specified pose...")
-            robot.reset_to_pose(args.reset_action)
+            print(f"Resetting arm to specified pose "
+                  f"(release_grippers_first={args.reset_release_grippers})...")
+            robot.reset_to_pose(
+                args.reset_action,
+                release_grippers_first=args.reset_release_grippers,
+                gripper_open_value=args.reset_gripper_open_value,
+            )
             print("Reset done.")
         rng, ep_rng = jax.random.split(rng)
         result = run_episode(args, robot, agent_dp, airbot_config, agent=agent, rng=ep_rng, episode_id=ep)
@@ -403,6 +408,15 @@ if __name__ == '__main__':
     parser.add_argument('--control_rate', default=20, type=int)
     parser.add_argument('--reset_action', nargs='+', type=float, default=None,
                         help='Joint positions to reset the arm to before each episode (e.g. 7 values for single-arm)')
+    parser.add_argument('--reset_release_grippers', action='store_true',
+                        help='Open both grippers at current pose before moving '
+                             'to reset, then close at home. See '
+                             'launch_train_airbot.py for full semantics.')
+    parser.add_argument('--reset_gripper_open_value', default=0.072, type=float,
+                        help='ABSOLUTE gripper joint position (RAW) for "open" '
+                             'during the release-first reset sequence. '
+                             'G2/old_G2=0.072, E2B/PE2=0.0471. See '
+                             'launch_train_airbot.py for details.')
 
     args = parser.parse_args()
     main(args)

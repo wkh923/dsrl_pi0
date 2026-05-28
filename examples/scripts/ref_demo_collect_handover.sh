@@ -40,7 +40,7 @@ TASK_TAG=handover
 # PI0_CHECKPOINT_DIR="/home/jpy/RM/Airbot-VLA-RL/VLA/airbot-pi0/checkpoints/pick_eraser_out_of_box/pick_eraser/30000"
 
 PI0_CONFIG_PATH="/home/jpy/RM/Airbot-VLA-RL/VLA/airbot-pi0/openpi/data/handover/config.py"
-PI0_CHECKPOINT_DIR="/home/jpy/RM/Airbot-VLA-RL/VLA/airbot-pi0/checkpoints/handover/70000"
+PI0_CHECKPOINT_DIR="/home/jpy/RM/Airbot-VLA-RL/VLA/airbot-pi0/checkpoints/handover/74999"
 
 
 # Robot ports (single-arm: one port, dual-arm: two ports)
@@ -92,6 +92,7 @@ python3 examples/eval_airbot_test.py \
   --camera_index ${CAMERA_INDEX} \
   --instruction "${INSTRUCTION}" \
   --reset_action ${RESET_ACTION} \
+  --reset_release_grippers \
   --query_freq 25 \
   --max_timesteps 300 \
   --control_rate 20 \

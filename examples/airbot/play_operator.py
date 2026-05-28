@@ -126,18 +126,89 @@ class Robot:
             qpos.extend(obs[f"{group}/eef/joint_state"]["data"]["position"])
         return qpos
 
-    def reset_to_pose(self, joint_positions, wait_time=3.0):
-        """Reset the arm to a specified joint pose using planning mode."""
+    def reset_to_pose(self, joint_positions, wait_time=3.0,
+                      release_grippers_first=False,
+                      gripper_open_value=0.072,
+                      gripper_wait=1.0):
+        """Reset the arm to a specified joint pose using planning mode.
+
+        Args:
+            joint_positions: 7*N flat list of target joint positions per arm
+                (j1..j6 + gripper). The final value per arm is the gripper
+                closed/open value to leave the robot in at the end.
+            wait_time: seconds to wait after the home-pose move.
+            release_grippers_first: if True, do a 3-step sequence:
+                (1) open both grippers AT CURRENT POSE (releases anything held),
+                (2) move arms to home with grippers still open,
+                (3) close grippers at home (back to `joint_positions[gripper]`).
+                Used for tasks like handover where the arms may end a rollout
+                holding an object that must be dropped before reset.
+            gripper_open_value: ABSOLUTE gripper joint position (RAW, not
+                normalized) to treat as "open". Hardware-dependent:
+                  * G2 / old_G2 gripper: 0.072 (default; matches max of [0,0.072])
+                  * E2B / PE2 gripper:   0.0471
+                Verified from handover replay buffer qpos ∈ [0, 0.07049].
+                See airbot_data_collection/airbot/robots/airbot_play.py:184-194
+                for the per-eef limits.
+            gripper_wait: seconds to wait after gripper-only moves (steps 1, 3).
+        """
         import time
         from airbot_data_collection.basis import SystemMode
-        self.switch_mode(SystemMode.RESETTING)
-        time.sleep(0.1)
-        for index, (_group, robot) in enumerate(self.robots.items()):
-            segment = joint_positions[index * 7 : (index + 1) * 7]
-            robot.send_action([float(x) for x in segment])
-        time.sleep(wait_time)
-        self.switch_mode(SystemMode.SAMPLING)
-        time.sleep(0.1)
+
+        def _send_pose(positions):
+            """Send 7-DOF target per arm in current mode (planning in RESETTING)."""
+            for index, (_group, robot) in enumerate(self.robots.items()):
+                segment = positions[index * 7 : (index + 1) * 7]
+                robot.send_action([float(x) for x in segment])
+
+        def _servo_grippers(value):
+            """Directly servo each arm's gripper (mode-independent, fast)."""
+            for _group, robot in self.robots.items():
+                robot.interface.servo_eef_pos([float(value)])
+
+        if release_grippers_first:
+            # Step 1: open grippers via SERVO (no planning command → no gRPC
+            # conflict with subsequent steps). Done before switching to
+            # RESETTING so we stay in SAMPLING (servo) mode for this op.
+            print(f"  [reset] step 1/3: open grippers in place (servo, "
+                  f"wait {gripper_wait}s)")
+            _servo_grippers(gripper_open_value)
+            time.sleep(gripper_wait)
+
+            # Step 2: planning move arms to home (grippers stay open).
+            self.switch_mode(SystemMode.RESETTING)
+            time.sleep(0.1)
+            open_home = list(joint_positions)
+            for arm_idx in range(len(self.robots)):
+                gripper_pos_idx = arm_idx * 7 + 6
+                if gripper_pos_idx < len(open_home):
+                    open_home[gripper_pos_idx] = float(gripper_open_value)
+            print(f"  [reset] step 2/3: planning move arms to home "
+                  f"(wait {wait_time}s)")
+            _send_pose(open_home)
+            time.sleep(wait_time)
+
+            # Step 3: close grippers via SERVO (switch back to SAMPLING first
+            # to avoid any leftover planning state). Use the original gripper
+            # values from joint_positions (e.g. 0.0 = closed).
+            self.switch_mode(SystemMode.SAMPLING)
+            time.sleep(0.1)
+            n_arms = len(self.robots)
+            for arm_idx, (_group, robot) in enumerate(self.robots.items()):
+                gripper_pos_idx = arm_idx * 7 + 6
+                if gripper_pos_idx < len(joint_positions):
+                    robot.interface.servo_eef_pos(
+                        [float(joint_positions[gripper_pos_idx])])
+            print(f"  [reset] step 3/3: close grippers at home (servo, "
+                  f"wait {gripper_wait}s)")
+            time.sleep(gripper_wait)
+        else:
+            self.switch_mode(SystemMode.RESETTING)
+            time.sleep(0.1)
+            _send_pose(joint_positions)
+            time.sleep(wait_time)
+            self.switch_mode(SystemMode.SAMPLING)
+            time.sleep(0.1)
 
     def shutdown(self) -> bool:
         """Shutdown the robot."""

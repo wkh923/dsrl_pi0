@@ -66,6 +66,21 @@ if __name__ == '__main__':
                              'Empty = skip auto-reset (user resets manually).')
     parser.add_argument('--reset_wait_time', default=3.0, type=float,
                         help='Seconds to wait after sending reset_action (planning mode is blocking but server-side completion may lag).')
+    parser.add_argument('--reset_release_grippers', action='store_true',
+                        help='Before moving arms back to reset pose, open both '
+                             'grippers at the current pose (drops any held object). '
+                             'After arms reach home, close grippers. Useful for '
+                             'tasks like handover where the rollout may end with '
+                             'the arm gripping an object. Sequence is: '
+                             '(1) open grippers in place, (2) move arms to home '
+                             'with grippers open, (3) close grippers at home.')
+    parser.add_argument('--reset_gripper_open_value', default=0.072, type=float,
+                        help='ABSOLUTE gripper joint position (RAW, not '
+                             'normalized) for "open" during the release-first '
+                             'reset sequence. Hardware-dependent: G2/old_G2 = '
+                             '0.072 (default; max of [0, 0.072]), E2B/PE2 = '
+                             '0.0471. Verified from handover replay buffer '
+                             'qpos ∈ [0, 0.07049].')
 
     # Reward Model (RM) — BinaryProgressRewardModel dense rewards
     parser.add_argument('--use_rm', action='store_true',
@@ -99,17 +114,19 @@ if __name__ == '__main__':
                              'Must evenly divide frame_stride (10), '
                              'demo_clip_stride (5), and query_freq.')
     parser.add_argument('--rm_variant', default='progress',
-                        choices=['progress', 'eraser', 'clothes', 'drawer'],
+                        choices=['progress', 'eraser', 'clothes', 'drawer', 'handover'],
                         help="Which RM reward scheme to use. 'progress' = the "
                              'general continuous progress-delta reward '
                              '(rm_wrapper.AirbotRewardModel). \'eraser\' = the '
                              'milestone-based reward hard-coded for the '
                              'pick_eraser_out_of_box task '
                              '(rm_wrapper_eraser.EraserRewardModel). \'clothes\' '
-                             '= progress reward + a 90%-regime milestone reward '
+                             '= progress reward + a 85%-regime milestone reward '
                              'for fold_clothes (rm_wrapper_clothes.ClothesRewardModel). '
                              "'drawer' = milestone reward hard-coded for the "
-                             'open_drawer task (rm_wrapper_drawer.DrawerRewardModel).')
+                             'open_drawer task (rm_wrapper_drawer.DrawerRewardModel). '
+                             "'handover' = progress reward + 85%-regime milestone "
+                             'reward for handover (rm_wrapper_handover.HandoverRewardModel).')
 
     # SAC hyperparameters tuned for real robot (following train_real.py / run_real.sh)
     train_args_dict = dict(
