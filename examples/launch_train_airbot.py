@@ -114,7 +114,8 @@ if __name__ == '__main__':
                              'Must evenly divide frame_stride (10), '
                              'demo_clip_stride (5), and query_freq.')
     parser.add_argument('--rm_variant', default='progress',
-                        choices=['progress', 'eraser', 'clothes', 'drawer', 'handover'],
+                        choices=['progress', 'eraser', 'clothes', 'drawer', 'handover',
+                                 'robometer'],
                         help="Which RM reward scheme to use. 'progress' = the "
                              'general continuous progress-delta reward '
                              '(rm_wrapper.AirbotRewardModel). \'eraser\' = the '
@@ -126,7 +127,24 @@ if __name__ == '__main__':
                              "'drawer' = milestone reward hard-coded for the "
                              'open_drawer task (rm_wrapper_drawer.DrawerRewardModel). '
                              "'handover' = progress reward + 85%-regime milestone "
-                             'reward for handover (rm_wrapper_handover.HandoverRewardModel).')
+                             'reward for handover (rm_wrapper_handover.HandoverRewardModel). '
+                             "'robometer' = VLM-based progress/success scoring via "
+                             'robometer/robometer (robometer_wrapper.RobometerRewardModel), '
+                             'in place of the Reward-Model-MVP clip comparator.')
+    parser.add_argument('--robometer_repo_path',
+                        default='/home/jpy/RM/Airbot-VLA-RL/robometer',
+                        type=str,
+                        help="Path to the robometer repo root (pip install -e'd "
+                             'so the robometer.* package is importable without '
+                             'sys.path surgery; kept as an explicit arg for '
+                             'parity with --rm_repo_path and for existence checks).')
+    parser.add_argument('--robometer_model_path',
+                        default='robometer/Robometer-4B',
+                        type=str,
+                        help='HuggingFace model path passed to '
+                             'robometer.utils.save.load_model_from_hf. Use '
+                             "'robometer/Robometer-LIBERO' for the LIBERO-tuned "
+                             'variant, or a local checkpoint directory.')
 
     # SAC hyperparameters tuned for real robot (following train_real.py / run_real.sh)
     train_args_dict = dict(

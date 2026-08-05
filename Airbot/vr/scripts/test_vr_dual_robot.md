@@ -8,7 +8,7 @@ Inside Quest3 VR, enable USB debugging via a notification
 ## Set up reverse port forwarding
 
     adb reverse tcp:10000 tcp:10000
-
+    
 
 
 # Ros2 TCP Endpoint setup

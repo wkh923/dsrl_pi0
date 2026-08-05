@@ -228,14 +228,17 @@ def main(variant):
     # ---- Initialize Reward Model (RM) for dense rewards (optional) ----
     rm = None
     if getattr(variant, 'use_rm', False):
-        if not variant.rm_demo_path:
-            raise ValueError(
-                "--use_rm is set but --rm_demo_path is empty. Provide a folder "
-                "of frame_*.jpg from one successful rollout.")
-        if variant.rm_camera not in variant.camera_names:
-            raise ValueError(
-                f"--rm_camera={variant.rm_camera!r} not in --camera_names={variant.camera_names}")
         rm_variant = getattr(variant, 'rm_variant', 'progress')
+        if rm_variant != 'robometer':
+            # Robometer scores from the task instruction directly and needs no
+            # demo clip / fixed camera choice, unlike the Reward-Model-MVP variants.
+            if not variant.rm_demo_path:
+                raise ValueError(
+                    "--use_rm is set but --rm_demo_path is empty. Provide a folder "
+                    "of frame_*.jpg from one successful rollout.")
+            if variant.rm_camera not in variant.camera_names:
+                raise ValueError(
+                    f"--rm_camera={variant.rm_camera!r} not in --camera_names={variant.camera_names}")
         if rm_variant == 'eraser':
             from examples.airbot.rm_wrapper_eraser import EraserRewardModel as RMClass
         elif rm_variant == 'clothes':
@@ -244,18 +247,31 @@ def main(variant):
             from examples.airbot.rm_wrapper_drawer import DrawerRewardModel as RMClass
         elif rm_variant == 'handover':
             from examples.airbot.rm_wrapper_handover import HandoverRewardModel as RMClass
+        elif rm_variant == 'robometer':
+            from examples.airbot.robometer_wrapper import RobometerRewardModel as RMClass
         else:
             from examples.airbot.rm_wrapper import AirbotRewardModel as RMClass
         print(f"[RM] using reward variant: {rm_variant} ({RMClass.__name__})")
-        rm = RMClass(
-            demo_path=variant.rm_demo_path,
-            rm_repo_path=variant.rm_repo_path,
-            max_timesteps=variant.max_timesteps,
-            query_freq=variant.query_freq,
-            num_query_steps=variant.max_timesteps // variant.query_freq,
-            threshold_offset=variant.rm_threshold_offset,
-            capture_stride=getattr(variant, 'rm_capture_stride', 1),
-        )
+        if rm_variant == 'robometer':
+            rm = RMClass(
+                instruction=variant.instruction,
+                robometer_repo_path=variant.robometer_repo_path,
+                robometer_model_path=variant.robometer_model_path,
+                max_timesteps=variant.max_timesteps,
+                query_freq=variant.query_freq,
+                num_query_steps=variant.max_timesteps // variant.query_freq,
+                capture_stride=getattr(variant, 'rm_capture_stride', 1),
+            )
+        else:
+            rm = RMClass(
+                demo_path=variant.rm_demo_path,
+                rm_repo_path=variant.rm_repo_path,
+                max_timesteps=variant.max_timesteps,
+                query_freq=variant.query_freq,
+                num_query_steps=variant.max_timesteps // variant.query_freq,
+                threshold_offset=variant.rm_threshold_offset,
+                capture_stride=getattr(variant, 'rm_capture_stride', 1),
+            )
 
     # ---- Start DSRL training ----
     try:
