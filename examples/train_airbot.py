@@ -229,16 +229,16 @@ def main(variant):
     rm = None
     if getattr(variant, 'use_rm', False):
         rm_variant = getattr(variant, 'rm_variant', 'progress')
-        if rm_variant != 'robometer':
-            # Robometer scores from the task instruction directly and needs no
-            # demo clip / fixed camera choice, unlike the Reward-Model-MVP variants.
-            if not variant.rm_demo_path:
-                raise ValueError(
-                    "--use_rm is set but --rm_demo_path is empty. Provide a folder "
-                    "of frame_*.jpg from one successful rollout.")
-            if variant.rm_camera not in variant.camera_names:
-                raise ValueError(
-                    f"--rm_camera={variant.rm_camera!r} not in --camera_names={variant.camera_names}")
+        # --rm_camera applies to every variant: collect_traj captures rm_frames
+        # from that camera. Robometer needs no --rm_demo_path though — it scores
+        # against the task instruction, not a reference demo.
+        if variant.rm_camera not in variant.camera_names:
+            raise ValueError(
+                f"--rm_camera={variant.rm_camera!r} not in --camera_names={variant.camera_names}")
+        if rm_variant != 'robometer' and not variant.rm_demo_path:
+            raise ValueError(
+                "--use_rm is set but --rm_demo_path is empty. Provide a folder "
+                "of frame_*.jpg from one successful rollout.")
         if rm_variant == 'eraser':
             from examples.airbot.rm_wrapper_eraser import EraserRewardModel as RMClass
         elif rm_variant == 'clothes':
@@ -255,12 +255,15 @@ def main(variant):
         if rm_variant == 'robometer':
             rm = RMClass(
                 instruction=variant.instruction,
-                robometer_repo_path=variant.robometer_repo_path,
                 robometer_model_path=variant.robometer_model_path,
+                server_url=getattr(variant, 'robometer_server_url', ''),
                 max_timesteps=variant.max_timesteps,
                 query_freq=variant.query_freq,
                 num_query_steps=variant.max_timesteps // variant.query_freq,
                 capture_stride=getattr(variant, 'rm_capture_stride', 1),
+                relative_rewards=getattr(variant, 'robometer_relative_rewards', False),
+                max_input_frames=getattr(variant, 'robometer_max_frames', 8),
+                success_threshold=getattr(variant, 'robometer_success_threshold', 0.65),
             )
         else:
             rm = RMClass(

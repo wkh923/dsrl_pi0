@@ -1,19 +1,26 @@
 #!/bin/bash
-# Crash-resilient DSRL Airbot training WITH Robometer dense rewards.
+# Crash-resilient DSRL Airbot training WITH Robometer dense rewards
+# (pick_eraser_out_of_box).
 #
-# Difference vs run_airbot_resilient_rm_handover.sh:
+# Difference vs run_airbot_resilient_rm_eraser.sh:
 #   * --rm_variant robometer + --robometer_model_path replace --rm_demo_path /
-#     --rm_threshold_offset / --rm_repo_path (--rm_camera still applies: it
-#     selects which camera collect_traj records rm_frames from) → Robometer-4B
-#     scores task progress straight from (rollout frames, INSTRUCTION), no
-#     reference demo needed. Reward per query step = -0.5 +
-#     clip(progress_delta / (1/num_query_steps), -1, 1); the delta keeps its SIGN
-#     by default, so undoing progress is penalized down to -1.5 — faithful to the
-#     sim robometer branch, which applies no max()/clamp. Set MONOTONIC_FLAG below
-#     for RARM's exact [-0.5, +0.5] range. The +1.0 success override on the final
-#     step is still applied by train_utils_airbot.collect_traj.
+#     --rm_threshold_offset / --rm_repo_path → Robometer-4B scores task progress
+#     straight from (rollout frames, INSTRUCTION); no reference demo needed.
+#     Reward per query step = -0.5 + clip(progress_delta / (1/num_query_steps),
+#     -1, 1), on the same -0.5-centered scale as the RARM variants. Unlike RARM
+#     (monotonic high-water mark) the delta keeps its SIGN by default, so undoing
+#     progress is penalized down to -1.5 — faithful to the sim robometer branch,
+#     which applies no max()/clamp. Set MONOTONIC_FLAG below for RARM's exact
+#     [-0.5, +0.5] range. See examples/airbot/robometer_wrapper.py.
+#     Note this replaces the milestone-based EraserRewardModel, so unlike
+#     --rm_variant eraser the operator's 1/0 label is applied by the caller
+#     (+1.0 on the final query step), not baked into the RM itself.
 #   * RESUME_DIR uses a "_robometer_" suffix so this run lives in its own
-#     persistent dir, distinct from both the sparse baseline and the RM-MVP run.
+#     persistent dir, distinct from the sparse baseline and the RARM run.
+#
+# Reward resolution: 200/25 = 8 query steps, and Robometer's config caps a
+# forward pass at max_frames=8 progress points — so this task is ~1:1 with no
+# meaningful interpolation loss (the best-matched of the four tasks).
 #
 # One-time setup (NOT done by this script):
 #   The robometer package is vendored inside Reward-Model-MVP on branch
@@ -29,7 +36,7 @@
 #   Robometer-4B weights (8.3G) are already downloaded to ROBOMETER_MODEL_PATH.
 #
 # Behavior:
-#   - Same outer bash while-true restart loop as run_airbot_resilient_handover.sh.
+#   - Same outer bash while-true restart loop as run_airbot_resilient_eraser.sh.
 #   - python exit 0 / 130 (Ctrl+C) → break; else sleep 10 → retry.
 
 proj_name=DSRL_pi0_Airbot
@@ -38,7 +45,7 @@ seed=42
 
 # Task tag — appears in RESUME_DIR. Keep stable per task so state persists
 # across wrapper restarts; change it when switching tasks.
-TASK_TAG=handover
+TASK_TAG=pick_eraser_out_of_box
 
 export EXP=./logs/$proj_name
 export CUDA_VISIBLE_DEVICES=$device_id
@@ -55,16 +62,16 @@ RESUME_DIR="${EXP}/persistent_${TASK_TAG}_warm20_robometer_s${seed}"
 mkdir -p "$RESUME_DIR"
 
 # ============================================================
-# Fill in your configuration below (keep in sync with run_airbot_resilient_handover.sh)
+# Fill in your configuration below (must match run_airbot_resilient_eraser.sh)
 # ============================================================
 
-PI0_CONFIG_PATH="/home/jpy/RM/Airbot-VLA-RL/VLA/airbot-pi0/openpi/data/handover/config.py"
-PI0_CHECKPOINT_DIR="/home/jpy/RM/Airbot-VLA-RL/VLA/airbot-pi0/checkpoints/handover/74999"
+PI0_CONFIG_PATH="/home/jpy/RM/Airbot-VLA-RL/VLA/airbot-pi0/openpi/data/${TASK_TAG}/config.py"
+PI0_CHECKPOINT_DIR="/home/jpy/RM/Airbot-VLA-RL/VLA/airbot-pi0/checkpoints/${TASK_TAG}/pick_eraser/30000"
 
 ROBOT_PORTS="50051 50053"  # dual-arm
 CAMERA_INDEX="243222074218 243522071794 243222071389"
 CAMERA_NAMES="base_0_rgb left_wrist_0_rgb right_wrist_0_rgb"
-INSTRUCTION="please hand over the object"
+INSTRUCTION="pick eraser out of box"
 RESET_ACTION="-0.001618 -1.036 0.842 -1.615 0.634 1.695 0.0 -0.001618 -1.036 0.842 -1.615 0.634 1.695 0.0"
 NUM_RANDOM_ROLLOUTS=10
 
@@ -82,6 +89,7 @@ while true; do
     echo ""
     echo "[$(date)] === Attempt $attempt — DSRL+Robometer training starting ==="
     echo "[$(date)]     RESUME_DIR=${RESUME_DIR}"
+    echo "[$(date)]     ROBOMETER_MODEL_PATH=${ROBOMETER_MODEL_PATH}"
     echo ""
 
     python3 examples/launch_train_airbot.py \
@@ -110,10 +118,9 @@ while true; do
     --robot_ports ${ROBOT_PORTS} \
     --camera_names ${CAMERA_NAMES} \
     --camera_index ${CAMERA_INDEX} \
-    --max_timesteps 300 \
+    --max_timesteps 200 \
     --control_rate 20 \
     --reset_action ${RESET_ACTION} \
-    --reset_release_grippers \
     --instruction "${INSTRUCTION}" \
     --resume_dir "${RESUME_DIR}" \
     --use_rm \

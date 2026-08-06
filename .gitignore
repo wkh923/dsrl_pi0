@@ -132,3 +132,6 @@ logs/
 wandb/
 
 airbot-SDK/
+# Robometer / runtime artifacts
+airbot_logs/
+unsloth_compiled_cache/

@@ -131,20 +131,46 @@ if __name__ == '__main__':
                              "'robometer' = VLM-based progress/success scoring via "
                              'robometer/robometer (robometer_wrapper.RobometerRewardModel), '
                              'in place of the Reward-Model-MVP clip comparator.')
-    parser.add_argument('--robometer_repo_path',
-                        default='/home/jpy/RM/Airbot-VLA-RL/robometer',
+    parser.add_argument('--robometer_server_url', default='http://127.0.0.1:8765',
                         type=str,
-                        help="Path to the robometer repo root (pip install -e'd "
-                             'so the robometer.* package is importable without '
-                             'sys.path surgery; kept as an explicit arg for '
-                             'parity with --rm_repo_path and for existence checks).')
+                        help='URL of the robometer sidecar (examples/airbot/'
+                             'robometer_server.py, run in the `robometer` conda '
+                             'env). REQUIRED in practice: dsrl_pi0 cannot import '
+                             'robometer (py3.11/transformers 4.48.1 vs its '
+                             'py3.10/>=4.57). Set empty only to load in-process, '
+                             'which works solely inside the robometer env.')
+    parser.add_argument('--robometer_relative_rewards', action='store_true',
+                        help="Use robometer's use_relative_rewards branch "
+                             '(consecutive progress difference) instead of the '
+                             'absolute progress. Their wrapper defaults this to '
+                             'False, so absolute is the reference behavior — '
+                             'reward = last progress value of the subsequence, '
+                             'clamped [0,1] (evals/eval_utils.py::'
+                             'extract_rewards_from_output).')
+    parser.add_argument('--robometer_success_threshold', default=0.65, type=float,
+                        help='Success-probability threshold from their wrapper '
+                             '(example_libero_robometer_wrapper.py:227). Currently '
+                             'used for logging only; the operator 1/0 label still '
+                             'drives the terminal bonus.')
+    parser.add_argument('--robometer_max_frames', default=8, type=int,
+                        help='Max frames fed to Robometer per rollout (uniformly '
+                             'subsampled from the captured rm_frames; progress is '
+                             'interpolated back onto the full timeline). Bounds VRAM '
+                             'and improves the signal: measured on a 4090, 8 frames '
+                             '= 9.35 GiB peak / 0.3s, 40 = 13.58 GiB / 2.8s, 60 = '
+                             'OOM. On a successful fold_clothes demo the reward sum '
+                             'was +3.27 at 8 frames vs -6.11 at 40 (at fine spacing '
+                             "real progress falls below the model's jitter). 8 also "
+                             "matches the checkpoint's trained data.max_frames. "
+                             'Lower this first if you hit OOM; 0 disables subsampling.')
     parser.add_argument('--robometer_model_path',
-                        default='robometer/Robometer-4B',
+                        default='/home/jpy/RM/Airbot-VLA-RL/Reward-Model-MVP/checkpoints/Robometer-4B',
                         type=str,
-                        help='HuggingFace model path passed to '
-                             'robometer.utils.save.load_model_from_hf. Use '
-                             "'robometer/Robometer-LIBERO' for the LIBERO-tuned "
-                             'variant, or a local checkpoint directory.')
+                        help='Path passed to robometer.utils.save.load_model_from_hf '
+                             '— a local snapshot dir (downloaded via '
+                             "huggingface_hub.snapshot_download) by default, or a "
+                             "HuggingFace hub id (e.g. 'robometer/Robometer-4B') "
+                             'to resolve through the HF cache instead.')
 
     # SAC hyperparameters tuned for real robot (following train_real.py / run_real.sh)
     train_args_dict = dict(
